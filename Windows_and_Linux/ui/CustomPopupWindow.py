@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from prompting import normalize_options, option_display_name
+from preset_icon_library import PRESET_ICON_CHOICES, normalize_preset_icon
 from ui.UIUtils import ThemeBackground, colorMode
 from quick_action_workflow import number_key_to_index
 
@@ -85,6 +86,73 @@ DEFAULT_OPTIONS_JSON = r"""{
   }
 }"""
 
+class PresetIconPicker(QWidget):
+    """Compact visual library backed by the app's real PNG icon set."""
+
+    def __init__(self, selected_icon, parent=None):
+        super().__init__(parent)
+        self.selected_icon = normalize_preset_icon(selected_icon)
+        self.buttons_by_icon = {}
+        self.button_group = QtWidgets.QButtonGroup(self)
+        self.button_group.setExclusive(True)
+
+        grid = QtWidgets.QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(7)
+        grid.setVerticalSpacing(7)
+
+        for index, (icon_id, label) in enumerate(PRESET_ICON_CHOICES):
+            button = QtWidgets.QToolButton()
+            button.setCheckable(True)
+            button.setText(label)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            button.setIconSize(QtCore.QSize(22, 22))
+            button.setFixedSize(82, 58)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setAccessibleName(f"选择图标：{label}")
+            button.setToolTip(f"使用“{label}”图标")
+            icon_path = os.path.join(
+                os.path.dirname(sys.argv[0]),
+                f"{icon_id}_{'dark' if colorMode == 'dark' else 'light'}.png",
+            )
+            if os.path.exists(icon_path):
+                button.setIcon(QtGui.QIcon(icon_path))
+            button.setStyleSheet(f"""
+                QToolButton {{
+                    border: 1px solid {'#4f566a' if colorMode == 'dark' else '#e0e3eb'};
+                    border-radius: 9px;
+                    background: {'#2a2e39' if colorMode == 'dark' else '#fdfdff'};
+                    color: {'#e8ebf7' if colorMode == 'dark' else '#485065'};
+                    font-size: 11px;
+                    padding: 4px;
+                }}
+                QToolButton:hover {{
+                    border-color: #aab3f8;
+                    background: {'#343a48' if colorMode == 'dark' else '#f4f6ff'};
+                }}
+                QToolButton:checked {{
+                    border: 1px solid #6f7df0;
+                    background: {'#3d466c' if colorMode == 'dark' else '#edf0ff'};
+                    color: {'#ffffff' if colorMode == 'dark' else '#3042ad'};
+                    font-weight: 600;
+                }}
+            """)
+            button.clicked.connect(
+                lambda checked=False, chosen_icon=icon_id: self.set_selected_icon(
+                    chosen_icon
+                )
+            )
+            self.button_group.addButton(button)
+            self.buttons_by_icon[icon_id] = button
+            grid.addWidget(button, index // 6, index % 6)
+
+        self.set_selected_icon(self.selected_icon)
+
+    def set_selected_icon(self, icon_name):
+        self.selected_icon = normalize_preset_icon(icon_name)
+        self.buttons_by_icon[self.selected_icon].setChecked(True)
+
+
 class ButtonEditDialog(QDialog):
     """
     Dialog for editing or creating a button's properties
@@ -102,13 +170,14 @@ class ButtonEditDialog(QDialog):
         # The hotkey input is created in init_ui; tracked here so the
         # parent window can read it back from get_button_data().
         self.hotkey_input = None
+        self.icon_picker = None
         self.setWindowTitle(title)
         self.init_ui()
         
     def init_ui(self):
         layout = QVBoxLayout(self)
         
-        self.resize(560, 590)
+        self.resize(620, 730)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(10)
 
@@ -134,6 +203,16 @@ class ButtonEditDialog(QDialog):
             self.name_input.setText(self.button_data["name"])
         layout.addWidget(name_label)
         layout.addWidget(self.name_input)
+
+        icon_label = QLabel("预设图标")
+        icon_label.setStyleSheet(
+            f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;"
+        )
+        layout.addWidget(icon_label)
+        self.icon_picker = PresetIconPicker(
+            self.button_data.get("icon", "icons/custom"), self
+        )
+        layout.addWidget(self.icon_picker)
         
         # Instruction (changed to a multiline QPlainTextEdit)
         instruction_label = QLabel("希望 AI 如何处理所选文本？")
@@ -228,7 +307,7 @@ class ButtonEditDialog(QDialog):
             "prefix": "Make this change to the following text:\n\n",
             # Retrieve multiline text
             "instruction": self.instruction_input.toPlainText(),
-            "icon": "icons/custom",
+            "icon": self.icon_picker.selected_icon,
             "open_in_window": self.window_radio.isChecked(),
             "uses_base_instruction": True,
         }
@@ -398,7 +477,7 @@ class DraggableButton(QtWidgets.QPushButton):
         self.shortcut_badge.setGeometry(self.width() - 34, 11, 23, 23)
         self.shortcut_badge.raise_()
         if self.icon_container:
-            self.icon_container.setGeometry(0, 0, self.width(), self.height())
+            self.icon_container.setGeometry(self.width() - 68, 7, 64, 32)
 
 
 class ToggleSwitch(QtWidgets.QAbstractButton):
@@ -770,50 +849,50 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.set_selected_index(min(self.selected_index, max(0, len(self.button_widgets) - 1)))
 
     def add_edit_delete_icons(self, btn):
-        """Add edit/delete icons as overlays with proper spacing."""
+        """Place edit actions in a dedicated right-side rail."""
         if hasattr(btn, 'icon_container') and btn.icon_container:
             btn.icon_container.deleteLater()
         
         btn.icon_container = QtWidgets.QWidget(btn)
         btn.icon_container.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
-        
-        btn.icon_container.setGeometry(0, 0, btn.width(), btn.height())
+        btn.icon_container.setGeometry(btn.width() - 68, 7, 64, 32)
         
         circle_style = f"""
             QPushButton {{
-                background-color: {'#666' if colorMode=='dark' else '#999'};
-                border-radius: 10px;
-                min-width: 16px;
-                min-height: 16px;
-                max-width: 16px;
-                max-height: 16px;
-                padding: 1px;
-                margin: 0px;
+                background-color: {'rgba(255,255,255,12)' if colorMode=='dark' else 'rgba(255,255,255,210)'};
+                border: 1px solid {'#555d72' if colorMode=='dark' else '#dfe2ea'};
+                border-radius: 7px;
+                padding: 4px;
             }}
             QPushButton:hover {{
-                background-color: {'#888' if colorMode=='dark' else '#bbb'};
+                background-color: {'#3d466c' if colorMode=='dark' else '#edf0ff'};
+                border-color: #8e99ef;
             }}
         """
         
-        # Create edit icon (top-left)
         edit_btn = QPushButton(btn.icon_container)
-        edit_btn.setGeometry(3, 3, 16, 16)
+        edit_btn.setGeometry(2, 3, 26, 26)
+        edit_btn.setIconSize(QtCore.QSize(15, 15))
         pencil_icon = os.path.join(os.path.dirname(sys.argv[0]),
                         'icons', 'pencil' + ('_dark' if colorMode=='dark' else '_light') + '.png')
         if os.path.exists(pencil_icon):
             edit_btn.setIcon(QtGui.QIcon(pencil_icon))
         edit_btn.setStyleSheet(circle_style)
+        edit_btn.setToolTip("编辑预设")
+        edit_btn.setAccessibleName(f"编辑{btn.display_name}")
         edit_btn.clicked.connect(partial(self.edit_button_clicked, btn))
         edit_btn.show()
         
-        # Create delete icon (top-right)
         delete_btn = QPushButton(btn.icon_container)
-        delete_btn.setGeometry(btn.width() - 23, 3, 16, 16)
+        delete_btn.setGeometry(34, 3, 26, 26)
+        delete_btn.setIconSize(QtCore.QSize(15, 15))
         del_icon = os.path.join(os.path.dirname(sys.argv[0]),
                                 'icons', 'cross' + ('_dark' if colorMode=='dark' else '_light') + '.png')
         if os.path.exists(del_icon):
             delete_btn.setIcon(QtGui.QIcon(del_icon))
         delete_btn.setStyleSheet(circle_style)
+        delete_btn.setToolTip("删除预设")
+        delete_btn.setAccessibleName(f"删除{btn.display_name}")
         delete_btn.clicked.connect(partial(self.delete_button_clicked, btn))
         delete_btn.show()
         
@@ -881,7 +960,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
             else:
                 self.add_edit_delete_icons(btn)
 
-            btn.setStyleSheet(btn.base_style)
+            btn.setStyleSheet(
+                btn.base_style
+                + ("QPushButton { padding-right: 82px; }" if self.edit_mode else "")
+            )
 
         # Rebuild grid layout
         self.rebuild_grid_layout()
