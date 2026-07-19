@@ -354,7 +354,7 @@ class ResponseWindow(QtWidgets.QWidget):
         top_bar.addStretch()
 
         # Zoom label with matched size
-        zoom_label = QtWidgets.QLabel("Zoom:")
+        zoom_label = QtWidgets.QLabel("缩放：")
         zoom_label.setStyleSheet(f"""
             color: {'#aaaaaa' if colorMode == 'dark' else '#666666'};
             font-size: 14px;
@@ -364,9 +364,9 @@ class ResponseWindow(QtWidgets.QWidget):
         
         # Enhanced zoom controls with swapped order
         zoom_controls = [
-            ('plus', 'Zoom In', lambda: self.zoom_all_messages('in')),
-            ('minus', 'Zoom Out', lambda: self.zoom_all_messages('out')),
-            ('reset', 'Reset Zoom', lambda: self.zoom_all_messages('reset'))
+            ('plus', '放大', lambda: self.zoom_all_messages('in')),
+            ('minus', '缩小', lambda: self.zoom_all_messages('out')),
+            ('reset', '恢复默认缩放', lambda: self.zoom_all_messages('reset'))
         ]
             
         for icon, tooltip, action in zoom_controls:
@@ -685,9 +685,9 @@ class ResponseWindow(QtWidgets.QWidget):
         markdown = ""
         for msg in self.chat_history:
             if msg["role"] == "user":
-                markdown += f"**User**: {msg['content']}\n\n"
+                markdown += f"**用户**：{msg['content']}\n\n"
             else:
-                markdown += f"**Assistant**: {msg['content']}\n\n"
+                markdown += f"**AI**：{msg['content']}\n\n"
                 
         QtWidgets.QApplication.clipboard().setText(markdown)
         

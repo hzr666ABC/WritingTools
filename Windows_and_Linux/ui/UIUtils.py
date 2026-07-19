@@ -43,7 +43,13 @@ class UIUtils:
         if os.path.exists(icon_path): base.setWindowIcon(QtGui.QIcon(icon_path))
         main_layout = QtWidgets.QVBoxLayout(base)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        base.background = ThemeBackground(base, 'gradient')
+        app = getattr(base, 'app', None)
+        config = getattr(app, 'config', {}) or {}
+        base.background = ThemeBackground(
+            base,
+            config.get('theme', 'plain'),
+            custom_background_path=config.get('custom_background_path', ''),
+        )
         main_layout.addWidget(base.background)
 
 
@@ -51,12 +57,14 @@ class ThemeBackground(QtWidgets.QWidget):
     """
     A custom widget that creates a background for the application based on the selected theme.
     """
-    def __init__(self, parent=None, theme='gradient', is_popup=False, border_radius=0):
+    def __init__(self, parent=None, theme='gradient', is_popup=False,
+                 border_radius=0, custom_background_path=''):
         super().__init__(parent)
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.theme = theme
         self.is_popup = is_popup
         self.border_radius = border_radius
+        self.custom_background_path = custom_background_path
 
     def paintEvent(self, event):
         """
@@ -65,25 +73,45 @@ class ThemeBackground(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform, True)
-        if self.theme == 'gradient':
+        path = QtGui.QPainterPath()
+        path.addRoundedRect(0, 0, self.width(), self.height(), self.border_radius, self.border_radius)
+        painter.setClipPath(path)
+
+        if self.theme == 'custom' and os.path.isfile(self.custom_background_path):
+            background_image = QtGui.QPixmap(self.custom_background_path)
+            if not background_image.isNull():
+                scaled = background_image.scaled(
+                    self.size(),
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    QtCore.Qt.TransformationMode.SmoothTransformation,
+                )
+                offset_x = max(0, (scaled.width() - self.width()) // 2)
+                offset_y = max(0, (scaled.height() - self.height()) // 2)
+                source = QtCore.QRect(offset_x, offset_y, self.width(), self.height())
+                painter.drawPixmap(self.rect(), scaled, source)
+                overlay = QtGui.QColor(24, 27, 36, 188) if colorMode == 'dark' else QtGui.QColor(248, 249, 255, 210)
+                painter.fillRect(self.rect(), overlay)
+            else:
+                self._paint_plain_background(painter)
+        elif self.theme == 'gradient':
             if self.is_popup:
                 background_image = QtGui.QPixmap(os.path.join(os.path.dirname(sys.argv[0]), 'background_popup_dark.png' if colorMode == 'dark' else 'background_popup.png'))
             else:
                 background_image = QtGui.QPixmap(os.path.join(os.path.dirname(sys.argv[0]), 'background_dark.png' if colorMode == 'dark' else 'background.png'))
-            # Adds a path/border using which the border radius would be drawn
-            path = QtGui.QPainterPath()
-            path.addRoundedRect(0, 0, self.width(), self.height(), self.border_radius, self.border_radius)
-            painter.setClipPath(path)
-
             painter.drawPixmap(self.rect(), background_image)
         else:
-            if colorMode == 'dark':
-                color = QtGui.QColor(35, 35, 35)  # Dark mode color
-            else:
-                color = QtGui.QColor(222, 222, 222)  # Light mode color
-            brush = QtGui.QBrush(color)
-            painter.setBrush(brush)
-            pen = QtGui.QPen(QtGui.QColor(0, 0, 0, 0))
-            pen.setWidth(0)
-            painter.setPen(pen)
-            painter.drawRoundedRect(QtCore.QRect(0, 0, self.width(), self.height()), self.border_radius, self.border_radius)
+            self._paint_plain_background(painter)
+
+    def _paint_plain_background(self, painter):
+        color = (
+            QtGui.QColor(30, 33, 43, 245)
+            if colorMode == 'dark'
+            else QtGui.QColor(243, 245, 252, 245)
+        )
+        painter.setBrush(QtGui.QBrush(color))
+        painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0, 0)))
+        painter.drawRoundedRect(
+            QtCore.QRect(0, 0, self.width(), self.height()),
+            self.border_radius,
+            self.border_radius,
+        )

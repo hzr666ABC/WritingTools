@@ -20,6 +20,9 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
+from prompting import compose_system_instruction, normalize_options, option_display_name
+from quick_action_workflow import bottom_right_position, resolve_remembered_option
+from ui.i18n import translate
 from update_checker import UpdateChecker
 
 _ = gettext.gettext
@@ -61,6 +64,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
         # Run any pending config migrations in a single pass (single restart).
         self._migrate_config()
+        self._ensure_custom_defaults()
 
         self.options = None
         self.options_path = None
@@ -87,6 +91,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self._capture_lock = threading.Lock()
 
         self._ = gettext.gettext
+        self.setup_translations('zh_CN')
 
         # Initialize the ctrl+c hotkey listener
         self.ctrl_c_timer = None
@@ -132,18 +137,22 @@ class WritingToolApp(QtWidgets.QApplication):
         if not lang:
             lang = QLocale.system().name().split('_')[0]
 
-        try:
-            translation = gettext.translation(
-                'messages',
-                localedir=os.path.join(os.path.dirname(__file__), 'locales'),
-                languages=[lang]
-            )
-        except FileNotFoundError:
-            translation = gettext.NullTranslations()
+        if str(lang).lower().startswith('zh'):
+            translation_function = translate
+        else:
+            try:
+                translation = gettext.translation(
+                    'messages',
+                    localedir=os.path.join(os.path.dirname(__file__), 'locales'),
+                    languages=[lang]
+                )
+            except FileNotFoundError:
+                translation = gettext.NullTranslations()
+            translation.install()
+            translation_function = translation.gettext
 
-        translation.install()
         # Update the translation function for all UI components.
-        self._ = translation.gettext
+        self._ = translation_function
         ui.AboutWindow._ = self._
         ui.SettingsWindow._ = self._
         ui.ResponseWindow._ = self._
@@ -186,12 +195,39 @@ class WritingToolApp(QtWidgets.QApplication):
         self.config_path = os.path.join(os.path.dirname(sys.argv[0]), 'config.json')
         logging.debug(f'Loading config from {self.config_path}')
         if os.path.exists(self.config_path):
-            with open(self.config_path, 'r') as f:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.config = json.load(f)
                 logging.debug('Config loaded successfully')
         else:
             logging.debug('Config file not found')
             self.config = None
+
+    def _ensure_custom_defaults(self):
+        """Add custom-build defaults without discarding existing user data."""
+        if self.config is None:
+            return
+
+        defaults = {
+            'locale': 'zh_CN',
+            'remember_last_action': False,
+            'last_used_option': 'Proofread',
+            'popup_position': 'bottom_right',
+            'custom_background_path': '',
+        }
+        changed = False
+        for key, value in defaults.items():
+            if key not in self.config:
+                self.config[key] = value
+                changed = True
+
+        # This fork is intentionally Chinese-first, including upgrades from
+        # the portable English release.
+        if self.config.get('locale') != 'zh_CN':
+            self.config['locale'] = 'zh_CN'
+            changed = True
+
+        if changed:
+            self.save_config(self.config)
 
     def _migrate_config(self):
         """
@@ -304,10 +340,8 @@ class WritingToolApp(QtWidgets.QApplication):
             # point in __init__.
             QMessageBox.information(
                 None,
-                'Writing Tools Updated',
-                'Writing Tools has just completed an internal update '
-                '(your config.json was migrated to the current format).\n\n'
-                'Please restart Writing Tools.'
+                '写作工具已更新',
+                '配置文件已升级为当前格式。\n\n请重新启动写作工具。'
             )
             sys.exit(0)
 
@@ -318,19 +352,19 @@ class WritingToolApp(QtWidgets.QApplication):
         self.options_path = os.path.join(os.path.dirname(sys.argv[0]), 'options.json')
         logging.debug(f'Loading options from {self.options_path}')
         if os.path.exists(self.options_path):
-            with open(self.options_path, 'r') as f:
-                self.options = json.load(f)
+            with open(self.options_path, 'r', encoding='utf-8') as f:
+                self.options = normalize_options(json.load(f))
                 logging.debug('Options loaded successfully')
         else:
             logging.debug('Options file not found')
-            self.options = None
+            self.options = {}
 
     def save_config(self, config):
         """
         Save the configuration file.
         """
-        with open(self.config_path, 'w') as f:
-            json.dump(config, f, indent=4)
+        with open(self.config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
             logging.debug('Config saved successfully')
         self.config = config
 
@@ -515,6 +549,11 @@ class WritingToolApp(QtWidgets.QApplication):
             self.current_provider.cancel()
             self.output_queue = ""
 
+        option = resolve_remembered_option(self.config, self.options)
+        if option:
+            self._fire_button_directly(option)
+            return
+
         # noinspection PyTypeChecker
         QtCore.QMetaObject.invokeMethod(self, "_show_popup", QtCore.Qt.ConnectionType.QueuedConnection)
 
@@ -556,7 +595,7 @@ class WritingToolApp(QtWidgets.QApplication):
             screen = QGuiApplication.screenAt(cursor_pos)
             if screen is None:
                 screen = QGuiApplication.primaryScreen()
-            screen_geometry = screen.geometry()
+            screen_geometry = screen.availableGeometry()
             logging.debug(f'Cursor is on screen: {screen.name()}')
             logging.debug(f'Screen geometry: {screen_geometry}')
             # Show the popup to get its size
@@ -564,19 +603,15 @@ class WritingToolApp(QtWidgets.QApplication):
             self.popup_window.adjustSize()
             # Ensure the popup it's focused, even on lower-end machines
             self.popup_window.activateWindow()
-            QtCore.QTimer.singleShot(100, self.popup_window.custom_input.setFocus)
+            # Keep focus on the popup so 1–9 and arrow keys work immediately.
+            # The free-form input receives focus only after the user clicks it.
+            QtCore.QTimer.singleShot(100, self.popup_window.setFocus)
 
             popup_width = self.popup_window.width()
             popup_height = self.popup_window.height()
-            # Calculate position
-            x = cursor_pos.x()
-            y = cursor_pos.y() + 20  # 20 pixels below cursor
-            # Adjust if the popup would go off the right edge of the screen
-            if x + popup_width > screen_geometry.right():
-                x = screen_geometry.right() - popup_width
-            # Adjust if the popup would go off the bottom edge of the screen
-            if y + popup_height > screen_geometry.bottom():
-                y = cursor_pos.y() - popup_height - 10  # 10 pixels above cursor
+            # Default to the bottom-right work area so the popup is predictable
+            # and does not cover the user's current selection.
+            x, y = bottom_right_position(screen_geometry, popup_width, popup_height)
             self.popup_window.move(x, y)
             logging.debug(f'Popup window moved to position: ({x}, {y})')
         except Exception as e:
@@ -657,6 +692,9 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         logging.debug(f'Processing option: {option}')
 
+        if option != 'Custom' and option in self.options:
+            self.set_last_used_option(option)
+
         # Drop any stale ref so a previous run's late-arriving response can't
         # land in a now-irrelevant window. The new window (if any) is created
         # by the worker via `_setup_response_window` once the text is in.
@@ -668,6 +706,22 @@ class WritingToolApp(QtWidgets.QApplication):
             args=(option, custom_change),
             daemon=True
         ).start()
+
+    def set_last_used_option(self, option):
+        """Persist the last successful preset choice for direct-run mode."""
+        if not self.config or option not in self.options or option == 'Custom':
+            return
+        if self.config.get('last_used_option') == option:
+            return
+        self.config['last_used_option'] = option
+        self.save_config(self.config)
+
+    def set_remember_last_action(self, enabled):
+        """Enable or disable direct execution from the main shortcut."""
+        if self.config is None:
+            return
+        self.config['remember_last_action'] = bool(enabled)
+        self.save_config(self.config)
 
     @Slot(str, str)
     def _setup_response_window(self, option, selected_text):
@@ -707,7 +761,7 @@ class WritingToolApp(QtWidgets.QApplication):
             # popup show became instant — we no longer have a way to detect
             # "user wants to chat" vs "capture failed", so we pick the safer
             # interpretation and surface the error.
-            self.show_message_signal.emit('Error', 'Please select text to use this option.')
+            self.show_message_signal.emit('错误', '请先选择要处理的文字。')
             return
 
         if self.options[option]['open_in_window']:
@@ -720,9 +774,9 @@ class WritingToolApp(QtWidgets.QApplication):
             )
 
         try:
-            selected_prompt = self.options.get(option, ('', ''))
-            prompt_prefix = selected_prompt['prefix']
-            system_instruction = selected_prompt['instruction']
+            selected_prompt = self.options.get(option, {})
+            prompt_prefix = selected_prompt.get('prefix', '')
+            system_instruction = compose_system_instruction(selected_prompt)
             if option == 'Custom':
                 prompt = f"{prompt_prefix}Described change: {custom_change}\n\nText: {selected_text}"
             else:
@@ -755,9 +809,9 @@ class WritingToolApp(QtWidgets.QApplication):
             logging.error(f'An error occurred: {e}', exc_info=True)
 
             if "Resource has been exhausted" in str(e):
-                self.show_message_signal.emit('Error - Rate Limit Hit', 'Whoops! You\'ve hit the per-minute rate limit of the Gemini API. Please try again in a few moments.\n\nIf this happens often, simply switch to a Gemini model with a higher usage limit in Settings.')
+                self.show_message_signal.emit('请求频率受限', 'Gemini API 已达到每分钟请求上限，请稍后再试。若经常发生，请在设置中切换到配额更高的模型。')
             else:
-                self.show_message_signal.emit('Error', f'An error occurred: {e}')
+                self.show_message_signal.emit('错误', f'处理时发生错误：{e}')
 
     @Slot(str, str)
     def show_message_box(self, title, message):
@@ -770,7 +824,8 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         Show the response in a new window instead of pasting it.
         """
-        response_window = ui.ResponseWindow.ResponseWindow(self, f"{option} Result")
+        display_name = option_display_name(option, self.options.get(option, {}))
+        response_window = ui.ResponseWindow.ResponseWindow(self, f"{display_name}结果")
         response_window.selected_text = text  # Store the text for regeneration
         response_window.show()
         return response_window
@@ -788,7 +843,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
             # If the new text is the error message, show a message box
             if current_output == error_message:
-                self.show_message_signal.emit('Error', 'The text is incompatible with the requested change.')
+                self.show_message_signal.emit('错误', '所选文字不适用于当前预设。')
                 return
 
             # Check if we're building up to the error message (to prevent partial pasting)
@@ -852,7 +907,7 @@ class WritingToolApp(QtWidgets.QApplication):
         else:
             self.tray_icon = QtWidgets.QSystemTrayIcon(QtGui.QIcon(icon_path), self)
         # Set the tooltip (hover name) for the tray icon
-        self.tray_icon.setToolTip("WritingTools")
+        self.tray_icon.setToolTip("写作工具")
         self.tray_menu = QtWidgets.QMenu()
         self.tray_icon.setContextMenu(self.tray_menu)
 
@@ -967,7 +1022,7 @@ class WritingToolApp(QtWidgets.QApplication):
             try:
                 if not response_window.chat_history:
                     logging.error("No chat history found")
-                    self.show_message_signal.emit('Error', 'Chat history not found')
+                    self.show_message_signal.emit('错误', '未找到对话记录。')
                     return
 
                 # Add current question to chat history
@@ -1045,11 +1100,11 @@ class WritingToolApp(QtWidgets.QApplication):
                 logging.error(f'Error processing follow-up question: {e}', exc_info=True)
 
                 if "Resource has been exhausted" in str(e):
-                    self.show_message_signal.emit('Error - Rate Limit Hit', 'Whoops! You\'ve hit the per-minute rate limit of the Gemini API. Please try again in a few moments.\n\nIf this happens often, simply switch to a Gemini model with a higher usage limit in Settings.')
-                    self.followup_response_signal.emit("Sorry, an error occurred while processing your question.")
+                    self.show_message_signal.emit('请求频率受限', 'Gemini API 已达到每分钟请求上限，请稍后再试。')
+                    self.followup_response_signal.emit("抱歉，处理追问时发生错误。")
                 else:
-                    self.show_message_signal.emit('Error', f'An error occurred: {e}')
-                    self.followup_response_signal.emit("Sorry, an error occurred while processing your question.")
+                    self.show_message_signal.emit('错误', f'处理时发生错误：{e}')
+                    self.followup_response_signal.emit("抱歉，处理追问时发生错误。")
 
         # Start the thread
         threading.Thread(target=process_thread, daemon=True).start()

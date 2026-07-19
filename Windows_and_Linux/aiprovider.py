@@ -112,15 +112,16 @@ class TextSetting(AIProviderSetting):
     def render_to_layout(self, layout: QVBoxLayout):
         row_layout = QtWidgets.QHBoxLayout()
         label = QtWidgets.QLabel(self.display_name)
-        label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode=='dark' else '#333333'};")
+        label.setStyleSheet(f"font-size: 13px; min-width: 110px; color: {'#ffffff' if colorMode=='dark' else '#45495a'};")
         row_layout.addWidget(label)
         self.input = QtWidgets.QLineEdit(self.internal_value)
         self.input.setStyleSheet(f"""
-            font-size: 16px;
-            padding: 5px;
+            font-size: 13px;
+            padding: 8px 10px;
             background-color: {'#444' if colorMode=='dark' else 'white'};
             color: {'#ffffff' if colorMode=='dark' else '#000000'};
-            border: 1px solid {'#666' if colorMode=='dark' else '#ccc'};
+            border: 1px solid {'#666' if colorMode=='dark' else '#d7dae6'};
+            border-radius: 9px;
         """)
         self.input.setPlaceholderText(self.description)
         row_layout.addWidget(self.input)
@@ -146,7 +147,7 @@ class DropdownSetting(AIProviderSetting):
 
     def __init__(self, name: str, display_name: str = None, default_value: str = None,
                  description: str = None, options: list = None, allow_custom: bool = False,
-                 custom_placeholder: str = "Enter custom value"):
+                 custom_placeholder: str = "输入自定义值"):
         super().__init__(name, display_name, default_value, description)
         self.options = options if options else []
         self.internal_value = default_value
@@ -159,15 +160,16 @@ class DropdownSetting(AIProviderSetting):
     def render_to_layout(self, layout: QVBoxLayout):
         row_layout = QtWidgets.QHBoxLayout()
         label = QtWidgets.QLabel(self.display_name)
-        label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode=='dark' else '#333333'};")
+        label.setStyleSheet(f"font-size: 13px; min-width: 110px; color: {'#ffffff' if colorMode=='dark' else '#45495a'};")
         row_layout.addWidget(label)
         self.dropdown = QtWidgets.QComboBox()
         self.dropdown.setStyleSheet(f"""
-            font-size: 16px;
-            padding: 5px;
+            font-size: 13px;
+            padding: 8px 10px;
             background-color: {'#444' if colorMode=='dark' else 'white'};
             color: {'#ffffff' if colorMode=='dark' else '#000000'};
-            border: 1px solid {'#666' if colorMode=='dark' else '#ccc'};
+            border: 1px solid {'#666' if colorMode=='dark' else '#d7dae6'};
+            border-radius: 9px;
         """)
 
         # Add preset options
@@ -176,7 +178,7 @@ class DropdownSetting(AIProviderSetting):
 
         # Add "Custom" option if enabled
         if self.allow_custom:
-            self.dropdown.addItem("🔧 Custom", self._CUSTOM_SENTINEL)
+            self.dropdown.addItem("自定义", self._CUSTOM_SENTINEL)
 
         # Set initial selection based on internal_value
         index = self.dropdown.findData(self.internal_value)
@@ -201,11 +203,12 @@ class DropdownSetting(AIProviderSetting):
             self.custom_input = QtWidgets.QLineEdit()
             self.custom_input.setPlaceholderText(self.custom_placeholder)
             self.custom_input.setStyleSheet(f"""
-                font-size: 16px;
-                padding: 5px;
+                font-size: 13px;
+                padding: 8px 10px;
                 background-color: {'#444' if colorMode=='dark' else 'white'};
                 color: {'#ffffff' if colorMode=='dark' else '#000000'};
-                border: 1px solid {'#666' if colorMode=='dark' else '#ccc'};
+                border: 1px solid {'#666' if colorMode=='dark' else '#d7dae6'};
+                border-radius: 9px;
             """)
 
             # If current value is custom (not in presets), populate the input
@@ -254,14 +257,14 @@ class AIProvider(ABC):
       • cancel() to cancel an ongoing request
     """
     def __init__(self, app, provider_name: str, settings: List[AIProviderSetting],
-                 description: str = "An unfinished AI provider!",
+                 description: str = "尚未完成的 AI 服务。",
                  logo: str = "generic",
-                 button_text: str = "Go to URL",
+                 button_text: str = "打开网页",
                  button_action: callable = None):
         self.provider_name = provider_name
         self.settings = settings
         self.app = app
-        self.description = description if description else "An unfinished AI provider!"
+        self.description = description if description else "尚未完成的 AI 服务。"
         self.logo = logo
         self.button_text = button_text
         self.button_action = button_action
@@ -348,10 +351,10 @@ class GeminiProvider(AIProvider):
         self.client = None
 
         settings = [
-            TextSetting(name="api_key", display_name="API Key", description="Paste your Gemini API key here"),
+            TextSetting(name="api_key", display_name="API 密钥", description="在此粘贴 Gemini API 密钥"),
             DropdownSetting(
                 name="model_name",
-                display_name="Model",
+                display_name="模型",
                 default_value="gemini-flash-latest",
                 description="Select Gemini model to use",
                 options=[
@@ -359,23 +362,23 @@ class GeminiProvider(AIProvider):
                     # points to Gemini 3 Flash Preview — fast (~1–2s) and high
                     # quality. Capped at 20 free requests/day per the model's free
                     # tier.
-                    ("⭐ Gemini Flash Latest (very fast | only 20 free uses/day)", "gemini-flash-latest"),
+                    ("⭐ Gemini Flash Latest（很快｜免费版每日 20 次）", "gemini-flash-latest"),
                     # Gemma 4 models are unlimited on the free tier but noticeably
                     # slower (8–15s typical) since they run on different
                     # infrastructure.
-                    ("Gemma 4 31B (slow | unlimited free use)", "gemma-4-31b-it"),
-                    ("Gemma 4 26B A4B (slow | unlimited free use)", "gemma-4-26b-a4b-it"),
+                    ("Gemma 4 31B（较慢｜免费不限次数）", "gemma-4-31b-it"),
+                    ("Gemma 4 26B A4B（较慢｜免费不限次数）", "gemma-4-26b-a4b-it"),
                 ],
                 allow_custom=True,
-                custom_placeholder="e.g., gemini-3.1-pro-preview"
+                custom_placeholder="例如 gemini-3.1-pro-preview"
             )
         ]
         super().__init__(app, "Gemini (Recommended)", settings,
-            "• Google's Gemini is a powerful AI model available for free!\n"
-            "• An API key is required to connect to Gemini on your behalf.\n"
-            "• Click the button below to get your API key.",
+            "• Gemini 提供可免费使用的高质量 AI 模型。\n"
+            "• 连接服务需要 API 密钥。\n"
+            "• 点击下方按钮可前往获取密钥。",
             "gemini",
-            "Get API Key",
+            "获取 API 密钥",
             lambda: webbrowser.open("https://aistudio.google.com/app/apikey"))
 
     def _build_config(self, system_instruction: str) -> "genai_types.GenerateContentConfig":
@@ -514,16 +517,16 @@ class OpenAICompatibleProvider(AIProvider):
         self.client = None
 
         settings = [
-            TextSetting(name="api_key", display_name="API Key", description="API key for the OpenAI-compatible API."),
-            TextSetting("api_base", "API Base URL", "https://api.openai.com/v1", "E.g. https://api.openai.com/v1"),
-            TextSetting("api_organisation", "API Organisation", "", "Leave blank if not applicable."),
-            TextSetting("api_project", "API Project", "", "Leave blank if not applicable."),
-            TextSetting("api_model", "API Model", "gpt-4o-mini", "E.g. gpt-4o-mini"),
+            TextSetting(name="api_key", display_name="API 密钥", description="OpenAI 兼容接口的 API 密钥"),
+            TextSetting("api_base", "API 基础地址", "https://api.openai.com/v1", "例如 https://api.openai.com/v1"),
+            TextSetting("api_organisation", "API 组织", "", "不适用时请留空"),
+            TextSetting("api_project", "API 项目", "", "不适用时请留空"),
+            TextSetting("api_model", "模型名称", "gpt-4o-mini", "例如 gpt-4o-mini"),
         ]
         super().__init__(app, "OpenAI Compatible (For Experts)", settings,
-            "• Connect to ANY OpenAI-compatible API (v1/chat/completions).\n"
-            "• You must abide by the service's Terms of Service.",
-            "openai", "Get OpenAI API Key", lambda: webbrowser.open("https://platform.openai.com/account/api-keys"))
+            "• 可连接任意 OpenAI 兼容接口（v1/chat/completions）。\n"
+            "• 使用时请遵守对应服务的条款。",
+            "openai", "获取 OpenAI API 密钥", lambda: webbrowser.open("https://platform.openai.com/account/api-keys"))
 
     def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False) -> str:
         """
@@ -562,11 +565,11 @@ class OpenAICompatibleProvider(AIProvider):
             logging.error(f"Error while generating content: {error_str}")
             if "exceeded" in error_str or "rate limit" in error_str:
                 self.app.show_message_signal.emit(
-                    "Rate Limit Hit",
-                    "It appears you have hit an API rate/usage limit. Please try again later or adjust your settings."
+                    "请求频率受限",
+                    "API 已达到频率或用量限制，请稍后再试或调整设置。"
                 )
             else:
-                self.app.show_message_signal.emit("Error", f"An error occurred: {error_str}")
+                self.app.show_message_signal.emit("错误", f"处理时发生错误：{error_str}")
             return ""
 
     def after_load(self):
@@ -596,13 +599,13 @@ class OllamaProvider(AIProvider):
         self.client = None
         self.app = app
         settings = [
-            TextSetting("api_base", "API Base URL", "http://localhost:11434", "E.g. http://localhost:11434"),
-            TextSetting("api_model", "API Model", "llama3.1:8b", "E.g. llama3.1:8b"),
-            TextSetting("keep_alive", "Time to keep the model loaded in memory in minutes", "5", "E.g. 5")
+            TextSetting("api_base", "API 基础地址", "http://localhost:11434", "例如 http://localhost:11434"),
+            TextSetting("api_model", "模型名称", "llama3.1:8b", "例如 llama3.1:8b"),
+            TextSetting("keep_alive", "模型在内存中保留的分钟数", "5", "例如 5")
         ]
         super().__init__(app, "Ollama (For Experts)", settings,
-            "• Connect to an Ollama server (local LLM).",
-            "ollama", "Ollama Set-up Instructions",
+            "• 连接本机或局域网中的 Ollama 服务。",
+            "ollama", "查看 Ollama 设置说明",
             lambda: webbrowser.open("https://github.com/theJayTea/WritingTools?tab=readme-ov-file#-optional-ollama-local-llm-instructions-for-windows-v7-onwards"))
 
     def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False) -> str:
@@ -631,7 +634,7 @@ class OllamaProvider(AIProvider):
             return response_text
         except Exception as e:
             logging.error(f"Error during Ollama chat: {e}")
-            self.app.output_ready_signal.emit("An error occurred during Ollama chat.")
+            self.app.show_message_signal.emit("错误", f"Ollama 处理时发生错误：{e}")
             return ""
 
     def after_load(self):

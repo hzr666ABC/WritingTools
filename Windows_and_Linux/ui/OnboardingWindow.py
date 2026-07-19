@@ -1,6 +1,8 @@
 import logging
+import os
+import sys
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton
 
 from ui.UIUtils import UIUtils, colorMode
@@ -24,7 +26,7 @@ class OnboardingWindow(QtWidgets.QWidget):
     def init_ui(self):
         logging.debug('Initializing onboarding UI')
         self.setWindowTitle(_('Welcome to Writing Tools'))
-        self.resize(600, 500)
+        self.resize(650, 580)
 
         UIUtils.setup_window_and_layout(self)
 
@@ -39,48 +41,45 @@ class OnboardingWindow(QtWidgets.QWidget):
     def show_welcome_screen(self):
         UIUtils.clear_layout(self.content_layout)
 
-        title_label = QtWidgets.QLabel(_("Welcome to Writing Tools")+"!")
-        title_label.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
+        icon_label = QtWidgets.QLabel()
+        icon_path = os.path.join(os.path.dirname(sys.argv[0]), "icons", "app_icon.png")
+        if os.path.exists(icon_path):
+            icon_label.setPixmap(QtGui.QPixmap(icon_path).scaled(72, 72, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        self.content_layout.addWidget(icon_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        title_label = QtWidgets.QLabel("欢迎使用写作工具")
+        title_label.setStyleSheet(f"font-family: 'Microsoft YaHei UI'; font-size: 26px; font-weight: 650; color: {'#ffffff' if colorMode == 'dark' else '#242632'};")
         self.content_layout.addWidget(title_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        features_text = f"""
-        • {_('Instantly optimize your writing with AI by selecting your text and invoking Writing Tools with "ctrl+space", anywhere.')} 
-
-        • {_('Get a summary you can chat with of articles, YouTube videos, or documents by select all text with "ctrl+a"')}
-          {_('(or select the YouTube transcript from its description), invoking Writing Tools, and choosing Summary.')}
-
-        • {_('Chat with AI anytime by invoking Writing Tools without selecting any text.')}
-
-        • {_('Supports an extensive range of AI models:')}
-            - {_('Gemini 2.0')}
-            - {_('ANY OpenAI Compatible API — including local LLMs!')}
-        """
+        features_text = "选择任意文字，按下主快捷键即可校对、改写、总结或运行自己的预设。\n\n开启“记住上次操作”后，主快捷键会直接复用最近的预设；关闭时可用数字键快速选择。"
         features_label = QtWidgets.QLabel(features_text)
-        features_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
+        features_label.setWordWrap(True)
+        features_label.setStyleSheet(f"font-family: 'Microsoft YaHei UI'; font-size: 14px; line-height: 1.6; padding: 16px; border-radius: 12px; background: {'rgba(255,255,255,20)' if colorMode == 'dark' else 'rgba(241,243,255,220)'}; color: {'#e6e8f5' if colorMode == 'dark' else '#45495a'};")
         features_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.content_layout.addWidget(features_label)
 
-        shortcut_label = QtWidgets.QLabel("Customize your shortcut key (default: \"ctrl+space\"):")
+        shortcut_label = QtWidgets.QLabel("设置主快捷键（默认 ctrl+space）")
         shortcut_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         self.content_layout.addWidget(shortcut_label)
 
         self.shortcut_input = QtWidgets.QLineEdit(self.shortcut)
         self.shortcut_input.setStyleSheet(f"""
             font-size: 16px;
-            padding: 5px;
+            padding: 9px 12px;
             background-color: {'#444' if colorMode == 'dark' else 'white'};
             color: {'#ffffff' if colorMode == 'dark' else '#000000'};
-            border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+            border: 1px solid {'#666' if colorMode == 'dark' else '#d9dce8'};
+            border-radius: 9px;
         """)
         self.content_layout.addWidget(self.shortcut_input)
 
-        theme_label = QtWidgets.QLabel(_("Choose your theme:"))
+        theme_label = QtWidgets.QLabel("选择界面主题")
         theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         self.content_layout.addWidget(theme_label)
 
         theme_layout = QHBoxLayout()
-        gradient_radio = QRadioButton(_("Gradient"))
-        plain_radio = QRadioButton(_("Plain"))
+        gradient_radio = QRadioButton("柔光渐变")
+        plain_radio = QRadioButton("简约纯色")
         gradient_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         plain_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         gradient_radio.setChecked(self.theme == 'gradient')
@@ -89,18 +88,18 @@ class OnboardingWindow(QtWidgets.QWidget):
         theme_layout.addWidget(plain_radio)
         self.content_layout.addLayout(theme_layout)
 
-        next_button = QtWidgets.QPushButton(_('Next'))
+        next_button = QtWidgets.QPushButton('下一步：设置 AI 服务')
         next_button.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background-color: #5967e8;
                 color: white;
                 padding: 10px;
                 font-size: 16px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 10px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #4d5ad2;
             }
         """)
         next_button.clicked.connect(lambda: self.on_next_clicked(gradient_radio.isChecked()))
@@ -112,7 +111,12 @@ class OnboardingWindow(QtWidgets.QWidget):
         logging.debug(f'User selected shortcut: {self.shortcut}, theme: {self.theme}')
         self.app.config = {
             'shortcut': self.shortcut,
-            'theme': self.theme
+            'theme': self.theme,
+            'locale': 'zh_CN',
+            'remember_last_action': False,
+            'last_used_option': 'Proofread',
+            'popup_position': 'bottom_right',
+            'custom_background_path': '',
         }
         self.show_api_key_input()
 
