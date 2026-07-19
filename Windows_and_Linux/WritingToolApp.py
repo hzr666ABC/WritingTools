@@ -1115,11 +1115,34 @@ class WritingToolApp(QtWidgets.QApplication):
         Show the settings window.
         """
         logging.debug('Showing settings window')
-        # Always create a new settings window to handle providers_only correctly
-        self.settings_window = ui.SettingsWindow.SettingsWindow(self, providers_only=providers_only)
-        self.settings_window.close_signal.connect(self.exit_app)
-        self.settings_window.retranslate_ui()
+        if (
+            self.settings_window is None
+            or self.settings_window.providers_only != providers_only
+        ):
+            self.settings_window = ui.SettingsWindow.SettingsWindow(
+                self, providers_only=providers_only
+            )
+            self.settings_window.close_signal.connect(self.exit_app)
+            self.settings_window.retranslate_ui()
         self.settings_window.show()
+        self.settings_window.showNormal()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
+
+    def activate_from_second_instance(self):
+        """Bring the existing app forward when its shortcut is launched again."""
+
+        if self.onboarding_window and self.onboarding_window.isVisible():
+            window = self.onboarding_window
+        elif self.popup_window and self.popup_window.isVisible():
+            window = self.popup_window
+        else:
+            self.show_settings()
+            window = self.settings_window
+
+        window.showNormal()
+        window.raise_()
+        window.activateWindow()
 
 
     def show_about(self):

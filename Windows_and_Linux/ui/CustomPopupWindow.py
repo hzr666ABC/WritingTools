@@ -259,47 +259,59 @@ class DraggableButton(QtWidgets.QPushButton):
         self.setProperty("selected", False)
         self.shortcut_badge = QLabel(self)
         self.shortcut_badge.setAlignment(Qt.AlignCenter)
-        self.shortcut_badge.setStyleSheet(f"""
-            QLabel {{
-                min-width: 24px;
-                max-width: 24px;
-                min-height: 24px;
-                max-height: 24px;
-                border: 1px solid {'#63697c' if colorMode == 'dark' else '#d4d7e1'};
-                border-radius: 6px;
-                background: {'rgba(255,255,255,18)' if colorMode == 'dark' else 'rgba(255,255,255,180)'};
-                color: {'#dfe2f3' if colorMode == 'dark' else '#5e6373'};
-                font-size: 12px;
-            }}
-        """)
+        self.shortcut_badge.setStyleSheet(self.badge_style())
         self.shortcut_badge.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
 
-        self.setMinimumWidth(340)
-        self.setFixedHeight(42)
-        self.setIconSize(QtCore.QSize(20, 20))
+        self.setMinimumWidth(348)
+        self.setFixedHeight(46)
+        self.setIconSize(QtCore.QSize(19, 19))
 
-        # Scheme 1: airy light surface with a restrained blue-violet accent.
         self.base_style = f"""
             QPushButton {{
                 background-color: transparent;
-                border: 1px solid transparent;
-                border-radius: 8px;
-                padding: 7px 42px 7px 8px;
+                border: none;
+                border-left: 3px solid transparent;
+                border-bottom: 1px solid {'rgba(255,255,255,18)' if colorMode == 'dark' else '#e8eaf1'};
+                border-radius: 0;
+                padding: 8px 42px 8px 10px;
                 font-family: "Microsoft YaHei UI", "Segoe UI Variable";
                 font-size: 14px;
                 text-align: left;
-                color: {"#f7f8ff" if colorMode=="dark" else "#242632"};
+                color: {"#f4f6ff" if colorMode=="dark" else "#202638"};
             }}
             QPushButton[hover="true"] {{
-                background-color: {"rgba(74, 83, 120, 170)" if colorMode=="dark" else "rgba(241, 244, 255, 225)"};
+                background-color: {"rgba(82, 94, 145, 95)" if colorMode=="dark" else "rgba(240, 243, 255, 210)"};
             }}
             QPushButton[selected="true"] {{
-                background-color: {"rgba(84, 98, 180, 165)" if colorMode=="dark" else "rgba(232, 236, 255, 245)"};
-                border: 1px solid {"#7f8cff" if colorMode=="dark" else "#c9d0ff"};
+                background-color: {"rgba(83, 99, 187, 118)" if colorMode=="dark" else "rgba(235, 239, 255, 235)"};
+                border-left: 3px solid #6675ee;
+                color: {"#ffffff" if colorMode=="dark" else "#26358d"};
+                font-weight: 600;
             }}
         """
         self.setStyleSheet(self.base_style)
         logging.debug("DraggableButton initialized")
+
+    @staticmethod
+    def badge_style(selected=False):
+        border = "#7482ef" if selected else ("#555d72" if colorMode == "dark" else "#d9dce6")
+        text = "#7f8cff" if selected and colorMode == "dark" else (
+            "#4d5fd1" if selected else ("#dfe2f3" if colorMode == "dark" else "#697084")
+        )
+        return f"""
+            QLabel {{
+                min-width: 23px;
+                max-width: 23px;
+                min-height: 23px;
+                max-height: 23px;
+                border: 1px solid {border};
+                border-radius: 6px;
+                background: {'rgba(255,255,255,16)' if colorMode == 'dark' else 'rgba(255,255,255,205)'};
+                color: {text};
+                font-size: 12px;
+                font-weight: {600 if selected else 500};
+            }}
+        """
 
     def enterEvent(self, event):
         # Only update the hover property if NOT in edit mode.
@@ -383,7 +395,7 @@ class DraggableButton(QtWidgets.QPushButton):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.shortcut_badge.setGeometry(self.width() - 34, 9, 24, 24)
+        self.shortcut_badge.setGeometry(self.width() - 34, 11, 23, 23)
         self.shortcut_badge.raise_()
         if self.icon_container:
             self.icon_container.setGeometry(0, 0, self.width(), self.height())
@@ -448,7 +460,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("写作工具")
-        self.setFixedWidth(390)
+        self.setFixedWidth(404)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -458,14 +470,14 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self,
             self.app.config.get('theme', 'plain'),
             is_popup=True,
-            border_radius=18,
+            border_radius=20,
             custom_background_path=self.app.config.get('custom_background_path', ''),
         )
         main_layout.addWidget(self.background)
 
         content_layout = QtWidgets.QVBoxLayout(self.background)
-        content_layout.setContentsMargins(18, 16, 18, 14)
-        content_layout.setSpacing(10)
+        content_layout.setContentsMargins(22, 18, 22, 16)
+        content_layout.setSpacing(12)
 
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
@@ -488,7 +500,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         title_label.setStyleSheet(f"""
             color: {'#f7f8ff' if colorMode == 'dark' else '#242632'};
             font-family: "Microsoft YaHei UI", "Segoe UI Variable";
-            font-size: 19px;
+            font-size: 21px;
             font-weight: 650;
         """)
         top_bar.addWidget(title_label)
@@ -564,13 +576,11 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.remember_checkbox.setAccessibleName("记住上次操作")
         self.remember_checkbox.toggled.connect(self.on_remember_toggled)
         remember_row.addWidget(self.remember_checkbox)
-        content_layout.addLayout(remember_row)
 
         self.last_action_label = QLabel()
         self.last_action_label.setStyleSheet(
             f"color: {'#b9bfd9' if colorMode == 'dark' else '#69708a'}; font-size: 12px;"
         )
-        content_layout.addWidget(self.last_action_label)
 
         self.input_area = QWidget()
         input_layout = QHBoxLayout(self.input_area)
@@ -588,16 +598,16 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 QtGui.QIcon(custom_icon_path),
                 QLineEdit.ActionPosition.LeadingPosition,
             )
-        self.custom_input.setMinimumHeight(42)
+        self.custom_input.setMinimumHeight(46)
         self.custom_input.setStyleSheet(f"""
             QLineEdit {{
-                padding: 8px 12px;
+                padding: 9px 13px;
                 border: 1px solid {'rgba(255,255,255,35)' if colorMode == 'dark' else 'rgba(66,76,110,35)'};
-                border-radius: 11px;
-                background: {'rgba(39,42,52,220)' if colorMode == 'dark' else 'rgba(255,255,255,230)'};
+                border-radius: 12px;
+                background: {'rgba(31,35,46,225)' if colorMode == 'dark' else 'rgba(255,255,255,238)'};
                 color: {'#f7f8ff' if colorMode == 'dark' else '#242632'};
                 font-family: "Microsoft YaHei UI", "Segoe UI Variable";
-                font-size: 13px;
+                font-size: 14px;
             }}
             QLineEdit:focus {{ border: 1px solid #7f8cff; }}
         """)
@@ -612,12 +622,12 @@ class CustomPopupWindow(QtWidgets.QWidget):
         if os.path.exists(send_icon):
             send_btn.setIcon(QtGui.QIcon(send_icon))
         send_btn.setIconSize(QtCore.QSize(18, 18))
-        send_btn.setFixedSize(42, 42)
+        send_btn.setFixedSize(46, 46)
         send_btn.setToolTip("执行自定义修改")
         send_btn.setStyleSheet("""
-            QPushButton { background: #5967e8; border: none; border-radius: 11px; }
-            QPushButton:hover { background: #4d5bd8; }
-            QPushButton:pressed { background: #414ec4; }
+            QPushButton { background: #5b69e9; border: none; border-radius: 12px; }
+            QPushButton:hover { background: #4f5edc; }
+            QPushButton:pressed { background: #4452c7; }
         """)
         send_btn.clicked.connect(self.on_custom_change)
         input_layout.addWidget(send_btn)
@@ -626,17 +636,33 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.actions_container = QWidget()
         self.actions_layout = QtWidgets.QVBoxLayout(self.actions_container)
         self.actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.actions_layout.setSpacing(2)
+        self.actions_layout.setSpacing(0)
         content_layout.addWidget(self.actions_container)
 
         self.build_buttons_list()
         self.rebuild_grid_layout()
         self.update_last_action_label()
 
+        remember_surface = QWidget()
+        remember_surface.setObjectName("rememberSurface")
+        remember_surface.setStyleSheet(f"""
+            QWidget#rememberSurface {{
+                background: {'rgba(255,255,255,12)' if colorMode == 'dark' else 'rgba(245,247,252,210)'};
+                border: 1px solid {'rgba(255,255,255,18)' if colorMode == 'dark' else '#e7e9f0'};
+                border-radius: 10px;
+            }}
+        """)
+        remember_surface_layout = QVBoxLayout(remember_surface)
+        remember_surface_layout.setContentsMargins(12, 9, 12, 9)
+        remember_surface_layout.setSpacing(3)
+        remember_surface_layout.addLayout(remember_row)
+        remember_surface_layout.addWidget(self.last_action_label)
+        content_layout.addWidget(remember_surface)
+
         shortcut_help = QLabel("Esc 关闭  ·  ↑↓ 选择  ·  Enter 执行  ·  数字键快速选择")
         shortcut_help.setAlignment(Qt.AlignCenter)
         shortcut_help.setStyleSheet(
-            f"color: {'#9da3bb' if colorMode == 'dark' else '#7b8196'}; font-size: 11px;"
+            f"color: {'#979eb6' if colorMode == 'dark' else '#858ca0'}; font-size: 11px;"
         )
         content_layout.addWidget(shortcut_help)
 
@@ -1083,7 +1109,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         self.selected_index = index % len(self.button_widgets)
         for current_index, button in enumerate(self.button_widgets):
-            button.setProperty("selected", current_index == self.selected_index)
+            selected = current_index == self.selected_index
+            button.setProperty("selected", selected)
+            button.shortcut_badge.setStyleSheet(button.badge_style(selected))
             button.style().unpolish(button)
             button.style().polish(button)
 

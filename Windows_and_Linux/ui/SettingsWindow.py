@@ -149,26 +149,42 @@ class SettingsWindow(QtWidgets.QWidget):
 
     def init_ui(self):
         self.setWindowTitle("写作工具设置")
-        self.setMinimumWidth(720)
-        self.resize(780, 740)
+        self.setMinimumWidth(740)
+        self.resize(820, 760)
 
         UIUtils.setup_window_and_layout(self)
         main_layout = QtWidgets.QVBoxLayout(self.background)
-        main_layout.setContentsMargins(24, 22, 24, 22)
-        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(30, 26, 30, 24)
+        main_layout.setSpacing(16)
 
+        title_row = QtWidgets.QHBoxLayout()
+        title_row.setSpacing(11)
+        app_icon_label = QtWidgets.QLabel()
+        app_icon_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'app_icon.png')
+        if os.path.exists(app_icon_path):
+            app_icon_label.setPixmap(
+                QtGui.QPixmap(app_icon_path).scaled(
+                    30,
+                    30,
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        title_row.addWidget(app_icon_label)
         title_label = QtWidgets.QLabel("设置")
         title_label.setStyleSheet(f"""
-            color: {'#f7f8ff' if colorMode == 'dark' else '#242632'};
+            color: {'#f5f7ff' if colorMode == 'dark' else '#202638'};
             font-family: "Microsoft YaHei UI", "Segoe UI Variable";
-            font-size: 24px;
+            font-size: 26px;
             font-weight: 650;
         """)
-        main_layout.addWidget(title_label)
+        title_row.addWidget(title_label)
+        title_row.addStretch()
+        main_layout.addLayout(title_row)
 
         subtitle_label = QtWidgets.QLabel("保存后立即生效，无需重新启动。")
         subtitle_label.setStyleSheet(
-            f"color: {'#b9bfd9' if colorMode == 'dark' else '#69708a'}; font-size: 13px;"
+            f"color: {'#aeb5ce' if colorMode == 'dark' else '#747c91'}; font-size: 13px;"
         )
         main_layout.addWidget(subtitle_label)
 
@@ -188,29 +204,29 @@ class SettingsWindow(QtWidgets.QWidget):
         scroll_content = QtWidgets.QWidget()
         self.scroll_content = scroll_content
         content_layout = QtWidgets.QVBoxLayout(scroll_content)
-        content_layout.setContentsMargins(0, 4, 8, 4)
-        content_layout.setSpacing(14)
+        content_layout.setContentsMargins(0, 4, 8, 6)
+        content_layout.setSpacing(12)
 
         section_style = f"""
             QWidget#settingsSection {{
-                background: {'rgba(38,41,52,210)' if colorMode == 'dark' else 'rgba(255,255,255,215)'};
-                border: 1px solid {'rgba(255,255,255,28)' if colorMode == 'dark' else 'rgba(66,76,110,24)'};
-                border-radius: 14px;
+                background: {'rgba(32,35,45,218)' if colorMode == 'dark' else 'rgba(255,255,255,228)'};
+                border: 1px solid {'rgba(255,255,255,24)' if colorMode == 'dark' else '#e5e7ef'};
+                border-radius: 13px;
             }}
-            QLabel {{ color: {'#edf0ff' if colorMode == 'dark' else '#303341'}; }}
+            QLabel {{ color: {'#edf0ff' if colorMode == 'dark' else '#293043'}; }}
             QLineEdit, QComboBox {{
-                min-height: 36px;
-                padding: 4px 10px;
-                border: 1px solid {'#555c72' if colorMode == 'dark' else '#d7dae6'};
-                border-radius: 9px;
-                background: {'#2d303b' if colorMode == 'dark' else '#ffffff'};
-                color: {'#f7f8ff' if colorMode == 'dark' else '#242632'};
-                font-size: 13px;
+                min-height: 38px;
+                padding: 4px 11px;
+                border: 1px solid {'#51586d' if colorMode == 'dark' else '#d9dce6'};
+                border-radius: 10px;
+                background: {'#292d38' if colorMode == 'dark' else '#fdfdff'};
+                color: {'#f7f8ff' if colorMode == 'dark' else '#202638'};
+                font-size: 14px;
             }}
-            QLineEdit:focus, QComboBox:focus {{ border: 1px solid #7f8cff; }}
+            QLineEdit:focus, QComboBox:focus {{ border: 1px solid #6e7cf0; }}
             QCheckBox, QRadioButton {{
                 color: {'#e6e8f5' if colorMode == 'dark' else '#45495a'};
-                font-size: 13px;
+                font-size: 14px;
                 spacing: 8px;
             }}
         """
@@ -220,15 +236,15 @@ class SettingsWindow(QtWidgets.QWidget):
             section.setObjectName("settingsSection")
             section.setStyleSheet(section_style)
             layout = QtWidgets.QVBoxLayout(section)
-            layout.setContentsMargins(18, 16, 18, 18)
-            layout.setSpacing(10)
+            layout.setContentsMargins(20, 18, 20, 20)
+            layout.setSpacing(11)
             heading = QtWidgets.QLabel(title)
-            heading.setStyleSheet("font-size: 16px; font-weight: 650;")
+            heading.setStyleSheet("font-size: 17px; font-weight: 650;")
             layout.addWidget(heading)
             helper = QtWidgets.QLabel(description)
             helper.setWordWrap(True)
             helper.setStyleSheet(
-                f"color: {'#aeb4ca' if colorMode == 'dark' else '#73798d'}; font-size: 12px;"
+                f"color: {'#aeb4ca' if colorMode == 'dark' else '#778096'}; font-size: 13px;"
             )
             layout.addWidget(helper)
             return section, layout
@@ -330,7 +346,8 @@ class SettingsWindow(QtWidgets.QWidget):
                 self._provider_card_text(provider.provider_name)
             )
             button.setCheckable(True)
-            button.setMinimumHeight(54)
+            button.setMinimumHeight(58)
+            button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
             button.setAccessibleName(
                 f"切换到{self._provider_display_name(provider.provider_name)}"
             )
@@ -371,22 +388,31 @@ class SettingsWindow(QtWidgets.QWidget):
         save_button = QtWidgets.QPushButton(
             "完成 AI 设置" if self.providers_only else "保存设置"
         )
-        save_button.setFixedHeight(44)
+        save_button.setFixedSize(148, 44)
         save_button.setStyleSheet("""
             QPushButton {
-                background: #5967e8;
+                background: #5b69e9;
                 color: white;
                 padding: 10px 18px;
                 font-size: 14px;
                 font-weight: 650;
                 border: none;
-                border-radius: 11px;
+                border-radius: 10px;
             }
-            QPushButton:hover { background: #4d5bd8; }
-            QPushButton:pressed { background: #414ec4; }
+            QPushButton:hover { background: #4f5edc; }
+            QPushButton:pressed { background: #4452c7; }
         """)
         save_button.clicked.connect(self.save_settings)
-        main_layout.addWidget(save_button)
+        action_row = QtWidgets.QHBoxLayout()
+        action_row.setContentsMargins(2, 0, 0, 0)
+        save_note = QtWidgets.QLabel("更改仅保存在本机 · 无需重新启动")
+        save_note.setStyleSheet(
+            f"color: {'#969db5' if colorMode == 'dark' else '#858ca0'}; font-size: 12px;"
+        )
+        action_row.addWidget(save_note)
+        action_row.addStretch()
+        action_row.addWidget(save_button)
+        main_layout.addLayout(action_row)
 
     @staticmethod
     def _secondary_button_style():
@@ -396,7 +422,7 @@ class SettingsWindow(QtWidgets.QWidget):
                 padding: 4px 12px;
                 border: 1px solid {'#555c72' if colorMode == 'dark' else '#d7dae6'};
                 border-radius: 9px;
-                background: {'#343844' if colorMode == 'dark' else '#f6f7fb'};
+                background: {'#303541' if colorMode == 'dark' else '#f8f9fc'};
                 color: {'#edf0ff' if colorMode == 'dark' else '#45495a'};
                 font-size: 13px;
             }}
@@ -411,21 +437,21 @@ class SettingsWindow(QtWidgets.QWidget):
         return f"""
             QPushButton {{
                 padding: 7px 12px;
-                border: 1px solid {'#555c72' if colorMode == 'dark' else '#d9dce8'};
-                border-radius: 11px;
-                background: {'#303440' if colorMode == 'dark' else '#fafbfe'};
+                border: 1px solid {'#50576a' if colorMode == 'dark' else '#dfe2ea'};
+                border-radius: 10px;
+                background: {'#292e39' if colorMode == 'dark' else '#fcfcfe'};
                 color: {'#e8ebf8' if colorMode == 'dark' else '#4e5364'};
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 550;
                 text-align: left;
             }}
             QPushButton:hover {{
                 border-color: #aab3f8;
-                background: {'#383d4b' if colorMode == 'dark' else '#f2f4ff'};
+                background: {'#343a48' if colorMode == 'dark' else '#f3f5ff'};
             }}
             QPushButton:checked {{
-                border: 1px solid #7f8cff;
-                background: {'#414a75' if colorMode == 'dark' else '#e9edff'};
+                border: 1px solid #6f7df0;
+                background: {'#3d466c' if colorMode == 'dark' else '#edf0ff'};
                 color: {'#ffffff' if colorMode == 'dark' else '#3947b7'};
                 font-weight: 650;
             }}

@@ -1,6 +1,9 @@
 import logging
 import sys
 
+from PySide6 import QtCore
+
+from single_instance import SingleInstanceGuard
 from WritingToolApp import WritingToolApp
 
 # Set up logging to console
@@ -11,10 +14,26 @@ def main():
     """
     The main entry point of the application.
     """
-    app = WritingToolApp(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-    sys.exit(app.exec())
+    with SingleInstanceGuard() as instance_guard:
+        if instance_guard.already_running:
+            instance_guard.notify_existing()
+            return 0
+
+        app = WritingToolApp(sys.argv)
+        app.setQuitOnLastWindowClosed(False)
+
+        activation_timer = QtCore.QTimer(app)
+        activation_timer.setInterval(180)
+        activation_timer.timeout.connect(
+            lambda: (
+                app.activate_from_second_instance()
+                if instance_guard.consume_activation_request()
+                else None
+            )
+        )
+        activation_timer.start()
+        return app.exec()
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

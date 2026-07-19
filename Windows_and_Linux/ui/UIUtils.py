@@ -107,9 +107,9 @@ class ThemeBackground(QtWidgets.QWidget):
 
     def _paint_plain_background(self, painter):
         color = (
-            QtGui.QColor(30, 33, 43, 245)
+            QtGui.QColor(24, 27, 36, 248)
             if colorMode == 'dark'
-            else QtGui.QColor(243, 245, 252, 245)
+            else QtGui.QColor(247, 248, 252, 250)
         )
         painter.setBrush(QtGui.QBrush(color))
         painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0, 0)))
