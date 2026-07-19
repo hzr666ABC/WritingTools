@@ -6,6 +6,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton
 
 from ui.UIUtils import UIUtils, colorMode
+from ui.ShortcutRecorder import ShortcutRecorder
 
 _ = lambda x: x
 
@@ -62,7 +63,7 @@ class OnboardingWindow(QtWidgets.QWidget):
         shortcut_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         self.content_layout.addWidget(shortcut_label)
 
-        self.shortcut_input = QtWidgets.QLineEdit(self.shortcut)
+        self.shortcut_input = ShortcutRecorder(self.shortcut)
         self.shortcut_input.setStyleSheet(f"""
             font-size: 16px;
             padding: 9px 12px;
@@ -72,6 +73,11 @@ class OnboardingWindow(QtWidgets.QWidget):
             border-radius: 9px;
         """)
         self.content_layout.addWidget(self.shortcut_input)
+        shortcut_hint = QtWidgets.QLabel("点击输入框后直接按下快捷键；Backspace/Delete 可清除。")
+        shortcut_hint.setStyleSheet(
+            f"font-size: 12px; color: {'#b9bfd9' if colorMode == 'dark' else '#778096'};"
+        )
+        self.content_layout.addWidget(shortcut_hint)
 
         theme_label = QtWidgets.QLabel("选择界面主题")
         theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")

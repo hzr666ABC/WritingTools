@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from prompting import normalize_options, option_display_name
 from preset_icon_library import PRESET_ICON_CHOICES, normalize_preset_icon
+from ui.ShortcutRecorder import ShortcutRecorder
 from ui.UIUtils import ThemeBackground, colorMode
 from quick_action_workflow import number_key_to_index
 
@@ -259,7 +260,7 @@ class ButtonEditDialog(QDialog):
         hotkey_label.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;")
         layout.addWidget(hotkey_label)
 
-        self.hotkey_input = QLineEdit()
+        self.hotkey_input = ShortcutRecorder()
         self.hotkey_input.setStyleSheet(f"""
             QLineEdit {{
                 padding: 8px;
@@ -269,11 +270,11 @@ class ButtonEditDialog(QDialog):
                 color: {'#fff' if colorMode == 'dark' else '#000'};
             }}
         """)
-        self.hotkey_input.setPlaceholderText("例如 ctrl+j；留空则不设置")
+        self.hotkey_input.setPlaceholderText("点击后直接按下组合键")
         self.hotkey_input.setText(self.button_data.get("hotkey", ""))
         layout.addWidget(self.hotkey_input)
 
-        hotkey_hint = QLabel("在任意位置按下该组合键即可直接运行此预设，不显示选择弹窗。按键之间请使用“+”，例如 ctrl+j。")
+        hotkey_hint = QLabel("点击输入框后直接按下组合键即可录入；Backspace/Delete 清除，Esc 取消。设置后可在任意位置直接运行此预设。")
         hotkey_hint.setStyleSheet(
             f"color: {'#bbb' if colorMode == 'dark' else '#555'}; font-size: 12px;"
         )

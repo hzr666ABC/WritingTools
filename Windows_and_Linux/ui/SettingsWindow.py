@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
 from settings_logic import find_hotkey_conflict, provider_index_by_name
 
 from ui.AutostartManager import AutostartManager
+from ui.ShortcutRecorder import ShortcutRecorder
 from ui.UIUtils import UIUtils, colorMode
 
 _ = lambda x: x
@@ -257,11 +258,17 @@ class SettingsWindow(QtWidgets.QWidget):
 
             shortcut_label = QtWidgets.QLabel("主快捷键")
             general_layout.addWidget(shortcut_label)
-            self.shortcut_input = QtWidgets.QLineEdit(
+            self.shortcut_input = ShortcutRecorder(
                 self.app.config.get('shortcut', 'ctrl+space')
             )
-            self.shortcut_input.setPlaceholderText("例如 ctrl+space")
             general_layout.addWidget(self.shortcut_input)
+            shortcut_hint = QtWidgets.QLabel(
+                "点击输入框后直接按下新的组合键；Backspace/Delete 清除，Esc 取消。"
+            )
+            shortcut_hint.setStyleSheet(
+                f"color: {'#aeb4ca' if colorMode == 'dark' else '#778096'}; font-size: 12px;"
+            )
+            general_layout.addWidget(shortcut_hint)
 
             self.remember_checkbox = QtWidgets.QCheckBox("记住上次操作并由主快捷键直接执行")
             self.remember_checkbox.setChecked(
