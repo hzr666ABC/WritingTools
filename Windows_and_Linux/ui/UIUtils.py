@@ -14,12 +14,15 @@ class UIUtils:
         Clear the layout of all widgets.
         """
         while ((child := layout.takeAt(0)) != None):
-            #If the child is a layout, delete it
-            if child.layout():
-                cls.clear_layout(child.layout())
-                child.layout().deleteLater()
-            else:
-                child.widget().deleteLater()
+            child_layout = child.layout()
+            child_widget = child.widget()
+            if child_layout:
+                cls.clear_layout(child_layout)
+                child_layout.deleteLater()
+            elif child_widget:
+                child_widget.hide()
+                child_widget.setParent(None)
+                child_widget.deleteLater()
 
     @classmethod
     def resize_and_round_image(cls, image, image_size = 100, rounding_amount = 50):

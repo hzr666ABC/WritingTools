@@ -2,9 +2,11 @@ import os
 import sys
 
 from aiprovider import AIProvider
-from PySide6 import QtCore, QtWidgets
-from PySide6.QtGui import QImage
+from prompting import option_display_name
+from pynput import keyboard as pykeyboard
+from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
+from settings_logic import find_hotkey_conflict, provider_index_by_name
 
 from ui.AutostartManager import AutostartManager
 from ui.UIUtils import UIUtils, colorMode
@@ -22,16 +24,25 @@ class SettingsWindow(QtWidgets.QWidget):
         super().__init__()
         self.app = app
         self.current_provider_layout = None
+        self.provider_detail_widget = None
+        self.provider_button_group = None
+        self.provider_buttons = []
+        self.provider_selector_widget = None
+        self.selected_provider_index = 0
+        self.active_provider_index = None
+        self.provider_drafts = {}
+        self.scroll_area = None
+        self.scroll_content = None
         self.providers_only = providers_only
         self.gradient_radio = None
         self.plain_radio = None
-        self.provider_dropdown = None
         self.provider_container = None
         self.autostart_checkbox = None
         self.shortcut_input = None
         self.remember_checkbox = None
         self.custom_radio = None
         self.custom_background_input = None
+        self.background_preview = None
         self.init_ui()
         self.retranslate_ui()
 
@@ -47,104 +58,52 @@ class SettingsWindow(QtWidgets.QWidget):
             "Ollama (For Experts)": "Ollama 本地模型（高级）",
         }.get(provider_name, provider_name)
 
-    def init_provider_ui(self, provider: AIProvider, layout):
-        """
-        Initialize the user interface for the provider, including logo, name, description and all settings.
-        """
-        if self.current_provider_layout:
-            self.current_provider_layout.setParent(None)
-            UIUtils.clear_layout(self.current_provider_layout)
-            self.current_provider_layout.deleteLater()
+    @staticmethod
+    def _provider_card_text(provider_name):
+        return {
+            "Gemini (Recommended)": "Gemini\n推荐",
+            "OpenAI Compatible (For Experts)": "OpenAI\n兼容接口",
+            "Ollama (For Experts)": "Ollama\n本地模型",
+        }.get(provider_name, provider_name)
 
-        self.current_provider_layout = QtWidgets.QVBoxLayout()
-
-        # Create a horizontal layout for the logo and provider name
-        provider_header_layout = QtWidgets.QHBoxLayout()
-        provider_header_layout.setSpacing(10)
-        provider_header_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
-        if provider.logo:
-            logo_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons', f"provider_{provider.logo}.png")
-            if os.path.exists(logo_path):
-                targetPixmap = UIUtils.resize_and_round_image(QImage(logo_path), 30, 15)
-                logo_label = QtWidgets.QLabel()
-                logo_label.setPixmap(targetPixmap)
-                logo_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter)
-                provider_header_layout.addWidget(logo_label)
-
-        provider_name_label = QtWidgets.QLabel(self._provider_display_name(provider.provider_name))
-        provider_name_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-        provider_name_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter)
-        provider_header_layout.addWidget(provider_name_label)
-
-        self.current_provider_layout.addLayout(provider_header_layout)
+    def init_provider_ui(self, provider: AIProvider):
+        """Rebuild the selected provider details inside one stable container."""
+        UIUtils.clear_layout(self.current_provider_layout)
 
         if provider.description:
-            description_label = QtWidgets.QLabel(provider.description)
-            description_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'}; text-align: center;")
-            description_label.setWordWrap(True)
-            self.current_provider_layout.addWidget(description_label)
+            for description_line in provider.description.splitlines():
+                description_label = QtWidgets.QLabel(description_line.strip())
+                description_label.setStyleSheet(
+                    f"font-size: 12px; color: {'#b8bed4' if colorMode == 'dark' else '#6f7589'};"
+                )
+                description_label.setWordWrap(True)
+                self.current_provider_layout.addWidget(description_label)
 
         if hasattr(provider, 'ollama_button_text'):
-            # Create container for buttons
             button_layout = QtWidgets.QHBoxLayout()
-            
-            # Add Ollama setup button
             ollama_button = QtWidgets.QPushButton(provider.ollama_button_text)
-            ollama_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: #5967e8;
-                    color: white;
-                    padding: 10px;
-                    font-size: 16px;
-                    border: none;
-                    border-radius: 9px;
-                }}
-                QPushButton:hover {{
-                    background-color: #4d5ad2;
-                }}
-            """)
+            ollama_button.setStyleSheet(self._provider_action_button_style())
             ollama_button.clicked.connect(provider.ollama_button_action)
             button_layout.addWidget(ollama_button)
-            
-            # Add original button
             main_button = QtWidgets.QPushButton(provider.button_text)
-            main_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: #5967e8;
-                    color: white;
-                    padding: 10px;
-                    font-size: 16px;
-                    border: none;
-                    border-radius: 9px;
-                }}
-                QPushButton:hover {{
-                    background-color: #4d5ad2;
-                }}
-            """)
+            main_button.setStyleSheet(self._provider_action_button_style())
             main_button.clicked.connect(provider.button_action)
             button_layout.addWidget(main_button)
-            
             self.current_provider_layout.addLayout(button_layout)
         else:
-            # Original single button logic
             if provider.button_text:
                 button = QtWidgets.QPushButton(provider.button_text)
-                button.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: #5967e8;
-                        color: white;
-                        padding: 10px;
-                        font-size: 16px;
-                        border: none;
-                        border-radius: 9px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: #4d5ad2;
-                    }}
-                """)
+                button.setStyleSheet(self._provider_action_button_style())
                 button.clicked.connect(provider.button_action)
-                self.current_provider_layout.addWidget(button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+                self.current_provider_layout.addWidget(
+                    button, alignment=QtCore.Qt.AlignmentFlag.AlignLeft
+                )
+
+        detail_heading = QtWidgets.QLabel("连接设置")
+        detail_heading.setStyleSheet(
+            f"font-size: 14px; font-weight: 650; margin-top: 4px; color: {'#eef0ff' if colorMode == 'dark' else '#343746'};"
+        )
+        self.current_provider_layout.addWidget(detail_heading)
 
         # Initialize config if needed
         if "providers" not in self.app.config:
@@ -153,16 +112,45 @@ class SettingsWindow(QtWidgets.QWidget):
             self.app.config["providers"][provider.provider_name] = {}
 
         # Add provider settings
+        provider_values = self.provider_drafts.get(
+            provider.provider_name,
+            self.app.config["providers"][provider.provider_name],
+        )
         for setting in provider.settings:
-            setting.set_value(self.app.config["providers"][provider.provider_name].get(setting.name, setting.default_value))
+            setting.set_value(provider_values.get(setting.name, setting.default_value))
             setting.render_to_layout(self.current_provider_layout)
 
-        layout.addLayout(self.current_provider_layout)
+        self.provider_detail_widget.updateGeometry()
+        self.scroll_content.updateGeometry()
+
+    def select_provider(self, index, ensure_visible=True):
+        """Switch providers only after an explicit service-card click."""
+        if not 0 <= index < len(self.app.providers):
+            return
+        if self.active_provider_index == index:
+            return
+        if self.active_provider_index is not None:
+            previous = self.app.providers[self.active_provider_index]
+            self.provider_drafts[previous.provider_name] = {
+                setting.name: setting.get_value()
+                for setting in previous.settings
+            }
+        self.selected_provider_index = index
+        self.active_provider_index = index
+        self.provider_buttons[index].setChecked(True)
+        self.init_provider_ui(self.app.providers[index])
+        if ensure_visible:
+            QtCore.QTimer.singleShot(
+                0,
+                lambda: self.scroll_area.ensureWidgetVisible(
+                    self.provider_selector_widget, 0, 24
+                ),
+            )
 
     def init_ui(self):
         self.setWindowTitle("写作工具设置")
         self.setMinimumWidth(720)
-        self.resize(760, 720)
+        self.resize(780, 740)
 
         UIUtils.setup_window_and_layout(self)
         main_layout = QtWidgets.QVBoxLayout(self.background)
@@ -173,18 +161,19 @@ class SettingsWindow(QtWidgets.QWidget):
         title_label.setStyleSheet(f"""
             color: {'#f7f8ff' if colorMode == 'dark' else '#242632'};
             font-family: "Microsoft YaHei UI", "Segoe UI Variable";
-            font-size: 26px;
+            font-size: 24px;
             font-weight: 650;
         """)
         main_layout.addWidget(title_label)
 
-        subtitle_label = QtWidgets.QLabel("所有修改都会立即生效，无需重新启动。")
+        subtitle_label = QtWidgets.QLabel("保存后立即生效，无需重新启动。")
         subtitle_label.setStyleSheet(
             f"color: {'#b9bfd9' if colorMode == 'dark' else '#69708a'}; font-size: 13px;"
         )
         main_layout.addWidget(subtitle_label)
 
         scroll_area = QScrollArea()
+        self.scroll_area = scroll_area
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -197,6 +186,7 @@ class SettingsWindow(QtWidgets.QWidget):
         """)
 
         scroll_content = QtWidgets.QWidget()
+        self.scroll_content = scroll_content
         content_layout = QtWidgets.QVBoxLayout(scroll_content)
         content_layout.setContentsMargins(0, 4, 8, 4)
         content_layout.setSpacing(14)
@@ -233,7 +223,7 @@ class SettingsWindow(QtWidgets.QWidget):
             layout.setContentsMargins(18, 16, 18, 18)
             layout.setSpacing(10)
             heading = QtWidgets.QLabel(title)
-            heading.setStyleSheet("font-size: 17px; font-weight: 650;")
+            heading.setStyleSheet("font-size: 16px; font-weight: 650;")
             layout.addWidget(heading)
             helper = QtWidgets.QLabel(description)
             helper.setWordWrap(True)
@@ -254,6 +244,7 @@ class SettingsWindow(QtWidgets.QWidget):
             self.shortcut_input = QtWidgets.QLineEdit(
                 self.app.config.get('shortcut', 'ctrl+space')
             )
+            self.shortcut_input.setPlaceholderText("例如 ctrl+space")
             general_layout.addWidget(self.shortcut_input)
 
             self.remember_checkbox = QtWidgets.QCheckBox("记住上次操作并由主快捷键直接执行")
@@ -304,35 +295,73 @@ class SettingsWindow(QtWidgets.QWidget):
             clear_button.clicked.connect(self.clear_custom_background)
             background_row.addWidget(clear_button)
             appearance_layout.addLayout(background_row)
+
+            self.background_preview = QtWidgets.QLabel()
+            self.background_preview.setFixedHeight(78)
+            self.background_preview.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            self.background_preview.setStyleSheet(f"""
+                QLabel {{
+                    border: 1px solid {'#555c72' if colorMode == 'dark' else '#d7dae6'};
+                    border-radius: 10px;
+                    background: {'#2d303b' if colorMode == 'dark' else '#f8f9fc'};
+                }}
+            """)
+            appearance_layout.addWidget(self.background_preview)
+            self.update_background_preview(self.custom_background_input.text())
             content_layout.addWidget(appearance_section)
 
         provider_section, provider_layout = create_section(
             "AI 服务",
-            "选择要使用的模型服务，并填写该服务所需的连接信息。",
+            "点击服务卡片进行切换；悬停和滚轮不会改变当前服务。",
         )
-        self.provider_dropdown = QtWidgets.QComboBox()
-        self.provider_dropdown.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.provider_selector_widget = QtWidgets.QWidget()
+        selector_layout = QtWidgets.QHBoxLayout(self.provider_selector_widget)
+        selector_layout.setContentsMargins(0, 0, 0, 0)
+        selector_layout.setSpacing(8)
+        self.provider_button_group = QtWidgets.QButtonGroup(self)
+        self.provider_button_group.setExclusive(True)
         current_provider = self.app.config.get('provider', self.app.providers[0].provider_name)
-        for provider in self.app.providers:
-            self.provider_dropdown.addItem(
-                self._provider_display_name(provider.provider_name),
-                provider.provider_name,
-            )
-        self.provider_dropdown.setCurrentIndex(
-            max(0, self.provider_dropdown.findData(current_provider))
+        provider_names = [provider.provider_name for provider in self.app.providers]
+        self.selected_provider_index = provider_index_by_name(
+            provider_names, current_provider
         )
-        provider_layout.addWidget(self.provider_dropdown)
+        for index, provider in enumerate(self.app.providers):
+            button = QtWidgets.QPushButton(
+                self._provider_card_text(provider.provider_name)
+            )
+            button.setCheckable(True)
+            button.setMinimumHeight(54)
+            button.setAccessibleName(
+                f"切换到{self._provider_display_name(provider.provider_name)}"
+            )
+            logo_path = os.path.join(
+                os.path.dirname(sys.argv[0]),
+                'icons',
+                f"provider_{provider.logo}.png",
+            )
+            if os.path.exists(logo_path):
+                button.setIcon(QtGui.QIcon(logo_path))
+                button.setIconSize(QtCore.QSize(25, 25))
+            button.setStyleSheet(self._provider_card_style())
+            button.clicked.connect(
+                lambda checked=False, provider_index=index: self.select_provider(
+                    provider_index
+                )
+            )
+            self.provider_button_group.addButton(button, index)
+            self.provider_buttons.append(button)
+            selector_layout.addWidget(button, 1)
+        provider_layout.addWidget(self.provider_selector_widget)
 
-        self.provider_container = QtWidgets.QVBoxLayout()
-        provider_layout.addLayout(self.provider_container)
-        provider_instance = self.app.providers[self.provider_dropdown.currentIndex()]
-        self.init_provider_ui(provider_instance, self.provider_container)
-        self.provider_dropdown.currentIndexChanged.connect(
-            lambda: self.init_provider_ui(
-                self.app.providers[self.provider_dropdown.currentIndex()],
-                self.provider_container,
-            )
+        self.provider_detail_widget = QtWidgets.QWidget()
+        self.provider_detail_widget.setObjectName("providerDetails")
+        self.current_provider_layout = QtWidgets.QVBoxLayout(
+            self.provider_detail_widget
         )
+        self.current_provider_layout.setContentsMargins(2, 4, 2, 0)
+        self.current_provider_layout.setSpacing(9)
+        provider_layout.addWidget(self.provider_detail_widget)
+        self.select_provider(self.selected_provider_index, ensure_visible=False)
         content_layout.addWidget(provider_section)
         content_layout.addStretch()
 
@@ -377,6 +406,76 @@ class SettingsWindow(QtWidgets.QWidget):
             }}
         """
 
+    @staticmethod
+    def _provider_card_style():
+        return f"""
+            QPushButton {{
+                padding: 7px 12px;
+                border: 1px solid {'#555c72' if colorMode == 'dark' else '#d9dce8'};
+                border-radius: 11px;
+                background: {'#303440' if colorMode == 'dark' else '#fafbfe'};
+                color: {'#e8ebf8' if colorMode == 'dark' else '#4e5364'};
+                font-size: 12px;
+                font-weight: 550;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                border-color: #aab3f8;
+                background: {'#383d4b' if colorMode == 'dark' else '#f2f4ff'};
+            }}
+            QPushButton:checked {{
+                border: 1px solid #7f8cff;
+                background: {'#414a75' if colorMode == 'dark' else '#e9edff'};
+                color: {'#ffffff' if colorMode == 'dark' else '#3947b7'};
+                font-weight: 650;
+            }}
+            QPushButton:focus {{ border: 2px solid #7f8cff; }}
+        """
+
+    @staticmethod
+    def _provider_action_button_style():
+        return f"""
+            QPushButton {{
+                min-height: 32px;
+                padding: 3px 12px;
+                border: 1px solid {'#6571cf' if colorMode == 'dark' else '#aeb7f4'};
+                border-radius: 9px;
+                background: {'#353a4a' if colorMode == 'dark' else '#f4f6ff'};
+                color: {'#e9ecff' if colorMode == 'dark' else '#4654c6'};
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {'#41485b' if colorMode == 'dark' else '#e9edff'};
+                border-color: #7f8cff;
+            }}
+        """
+
+    def update_background_preview(self, path):
+        """Show a cropped preview only when a valid custom image exists."""
+        if not self.background_preview:
+            return
+        if not path or not os.path.isfile(path):
+            self.background_preview.clear()
+            self.background_preview.hide()
+            return
+        pixmap = QtGui.QPixmap(path)
+        if pixmap.isNull():
+            self.background_preview.hide()
+            return
+        target_size = QtCore.QSize(640, 78)
+        scaled = pixmap.scaled(
+            target_size,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
+        )
+        x = max(0, (scaled.width() - target_size.width()) // 2)
+        y = max(0, (scaled.height() - target_size.height()) // 2)
+        self.background_preview.setPixmap(
+            scaled.copy(x, y, target_size.width(), target_size.height())
+        )
+        self.background_preview.show()
+
     def choose_custom_background(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -387,9 +486,11 @@ class SettingsWindow(QtWidgets.QWidget):
         if path:
             self.custom_background_input.setText(path)
             self.custom_radio.setChecked(True)
+            self.update_background_preview(path)
 
     def clear_custom_background(self):
         self.custom_background_input.clear()
+        self.update_background_preview("")
         if self.custom_radio.isChecked():
             self.plain_radio.setChecked(True)
 
@@ -403,7 +504,37 @@ class SettingsWindow(QtWidgets.QWidget):
         self.app.config['locale'] = 'zh_CN'
 
         if not self.providers_only:
-            self.app.config['shortcut'] = self.shortcut_input.text()
+            shortcut = self.shortcut_input.text().strip().lower()
+            if not shortcut:
+                QtWidgets.QMessageBox.warning(
+                    self, "快捷键不能为空", "请输入主快捷键，例如 ctrl+space。"
+                )
+                self.shortcut_input.setFocus()
+                return
+            try:
+                pykeyboard.HotKey.parse(self.app._to_pynput_hotkey(shortcut))
+            except Exception:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "快捷键格式无效",
+                    "按键之间请使用“+”，例如 ctrl+space 或 ctrl+shift+p。",
+                )
+                self.shortcut_input.setFocus()
+                return
+            options = getattr(self.app, 'options', {})
+            conflict_key = find_hotkey_conflict(options, shortcut)
+            if conflict_key:
+                display_name = option_display_name(
+                    conflict_key, options.get(conflict_key, {})
+                )
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "快捷键冲突",
+                    f"该组合已经分配给“{display_name}”预设，请换一个快捷键。",
+                )
+                self.shortcut_input.setFocus()
+                return
+            self.app.config['shortcut'] = shortcut
             if self.custom_radio.isChecked() and self.custom_background_input.text():
                 self.app.config['theme'] = 'custom'
             elif self.gradient_radio.isChecked():
@@ -416,12 +547,13 @@ class SettingsWindow(QtWidgets.QWidget):
             self.app.create_tray_icon()
 
         self.app.config['streaming'] = False
-        self.app.config['provider'] = self.provider_dropdown.currentData()
+        selected_provider = self.app.providers[self.selected_provider_index]
+        self.app.config['provider'] = selected_provider.provider_name
 
         # Mark config as updated for v8 (new users start with this flag set)
         self.app.config['is_config_file_updated_for_v8'] = True
 
-        self.app.providers[self.provider_dropdown.currentIndex()].save_config()
+        selected_provider.save_config()
 
         provider_name = self.app.config.get('provider', 'Gemini')
         self.app.current_provider = next(

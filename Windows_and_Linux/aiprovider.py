@@ -42,7 +42,7 @@ from google import genai
 from google.genai import types as genai_types
 from ollama import Client as OllamaClient
 from openai import OpenAI
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 from PySide6.QtWidgets import QVBoxLayout
 from ui.UIUtils import colorMode
 
@@ -110,9 +110,11 @@ class TextSetting(AIProviderSetting):
         self.input = None
 
     def render_to_layout(self, layout: QVBoxLayout):
-        row_layout = QtWidgets.QHBoxLayout()
+        row_layout = QtWidgets.QVBoxLayout()
+        row_layout.setSpacing(4)
         label = QtWidgets.QLabel(self.display_name)
-        label.setStyleSheet(f"font-size: 13px; min-width: 110px; color: {'#ffffff' if colorMode=='dark' else '#45495a'};")
+        label.setWordWrap(True)
+        label.setStyleSheet(f"font-size: 12px; color: {'#ffffff' if colorMode=='dark' else '#555b6d'};")
         row_layout.addWidget(label)
         self.input = QtWidgets.QLineEdit(self.internal_value)
         self.input.setStyleSheet(f"""
@@ -132,6 +134,29 @@ class TextSetting(AIProviderSetting):
 
     def get_value(self):
         return self.input.text()
+
+
+class ClickActivatedComboBox(QtWidgets.QComboBox):
+    """Ignore hover-wheel changes until the user explicitly clicks the field."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._wheel_armed = False
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+
+    def mousePressEvent(self, event):
+        self._wheel_armed = True
+        super().mousePressEvent(event)
+
+    def focusOutEvent(self, event):
+        self._wheel_armed = False
+        super().focusOutEvent(event)
+
+    def wheelEvent(self, event):
+        if not self._wheel_armed or not self.hasFocus():
+            event.ignore()
+            return
+        super().wheelEvent(event)
 
 
 class DropdownSetting(AIProviderSetting):
@@ -158,11 +183,13 @@ class DropdownSetting(AIProviderSetting):
         self.custom_input_container = None
 
     def render_to_layout(self, layout: QVBoxLayout):
-        row_layout = QtWidgets.QHBoxLayout()
+        row_layout = QtWidgets.QVBoxLayout()
+        row_layout.setSpacing(4)
         label = QtWidgets.QLabel(self.display_name)
-        label.setStyleSheet(f"font-size: 13px; min-width: 110px; color: {'#ffffff' if colorMode=='dark' else '#45495a'};")
+        label.setWordWrap(True)
+        label.setStyleSheet(f"font-size: 12px; color: {'#ffffff' if colorMode=='dark' else '#555b6d'};")
         row_layout.addWidget(label)
-        self.dropdown = QtWidgets.QComboBox()
+        self.dropdown = ClickActivatedComboBox()
         self.dropdown.setStyleSheet(f"""
             font-size: 13px;
             padding: 8px 10px;
