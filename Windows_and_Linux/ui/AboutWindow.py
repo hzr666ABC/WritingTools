@@ -72,10 +72,10 @@ class AboutWindow(QtWidgets.QWidget):
                 _('Significantly improved the About window, making it scrollable and cleaning things up. Also improved our .gitignore & requirements.txt.') + '</b><br>' + \
                 '<b>7. <a href="https://github.com/Vadim-Karpenko">Vadim Karpenko</a>:</b><br>' + \
                 _('Helped add the start-on-boot setting.')+ "</b><br><br>" + \
-                'If you have a Mac, be sure to check out the <a href="https://github.com/theJayTea/WritingTools#-macos">Writing Tools macOS port</a> by <a href="https://github.com/Aryamirsepasi">Arya Mirsepasi</a>!<br>' + \
+                'Mac 用户可以查看 <a href="https://github.com/theJayTea/WritingTools#-macos">Writing Tools macOS 版本</a>（作者：<a href="https://github.com/Aryamirsepasi">Arya Mirsepasi</a>）。<br>' + \
                 """</p>
                 <p style='text-align: center;'>
-                <b>Version:</b> 7.0 (Codename: Impeccably Improved)
+                <b>版本：</b> 中文定制版（基于 Windows v9）
                 </p>
                 <p />
                 """
@@ -94,18 +94,18 @@ class AboutWindow(QtWidgets.QWidget):
         content_layout.addWidget(scroll_area)
 
         # Add "Check for updates" button
-        update_button = QtWidgets.QPushButton('Check for updates')
+        update_button = QtWidgets.QPushButton('查看原项目更新')
         update_button.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background-color: #5967e8;
                 color: white;
                 padding: 10px;
                 font-size: 16px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 10px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #4d5ad2;
             }
         """)
         update_button.clicked.connect(self.check_for_updates)

@@ -11,13 +11,13 @@ After extracting the folder, open your **Terminal** (or **Command Prompt**) in t
 - Windows:
    ```bash
    cd path\to\Windows_and_Linux
-   pip install -r requirements.txt
+   python -m pip install --require-hashes -r requirements-lock.txt
    ```
 
 - Linux:
    ```bash
    cd /path/to/Windows_and_Linux
-   pip3 install -r requirements.txt
+   python3 -m pip install --require-hashes -r requirements-lock.txt
    ```
 Of course, you'll need to have [Python installed](https://www.python.org/downloads/)!
 
@@ -35,4 +35,7 @@ Of course, you'll need to have [Python installed](https://www.python.org/downloa
    ```
 
 
-### [**◀️ Back to main page**](https://github.com/theJayTea/WritingTools)
+The hash-locked file is the recommended path for reproducible installs. Direct
+dependency declarations remain in `requirements.txt` for maintainers.
+
+### [**◀️ Back to main page**](../README.md)

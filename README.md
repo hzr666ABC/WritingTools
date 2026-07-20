@@ -1,295 +1,117 @@
-# Writing Tools
+# Writing Tools 中文增强版
 
-> **🍎 Using a Mac? Jump to the macOS (Native Swift Port) section → [macOS](#macos)**
+> 基于 [theJayTea/WritingTools](https://github.com/theJayTea/WritingTools) 的非官方中文社区版本。
+> 本项目不是原项目的官方中文版，也不代表原作者发布或背书。
 
-### **Instantly proofread and optimize your writing system-wide with AI:**
+[![安全检查](https://github.com/hzr666ABC/WritingTools/actions/workflows/security.yml/badge.svg)](https://github.com/hzr666ABC/WritingTools/actions/workflows/security.yml)
+[![许可证：GPLv3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+[![最新版本](https://img.shields.io/github/v/release/hzr666ABC/WritingTools?display_name=tag&sort=semver)](https://github.com/hzr666ABC/WritingTools/releases/latest)
 
-https://github.com/user-attachments/assets/d3ce4694-b593-45ff-ae9a-892ce94b1dc8
+Writing Tools 中文增强版是一款 Windows 全局 AI 写作助手。选中文本并按下快捷键，即可改写、校对、总结、翻译或执行自己的提示词；也可以连接 Gemini、OpenAI 兼容服务、Groq 和本地 Ollama。
 
-### **Summarize content (webpages, YouTube videos, documents...) in a click:**
+这个分支在保留原项目核心能力的基础上，重点改进中文体验、交互效率、外观和本地数据安全。
 
-https://github.com/user-attachments/assets/76d13eb9-168e-4459-ada4-62e0586ae58c
+## 与原版相比增加了什么
 
-### **Add your own buttons for unlimited potential!**
+- 完整中文界面与中文默认预设。
+- 现代化设置页、快捷弹窗和应用图标。
+- 可自定义窗口背景、字体比例和预设图标。
+- 按键录入式快捷键设置，无需手工输入组合键。
+- 记住上一次操作，可在按下主快捷键后直接执行。
+- 弹窗数字键快速选择预设，选择后自动关闭。
+- 单实例运行，重复启动不会产生多个独立实例。
+- 自定义提示词与内置基础提示词组合，提升预设输出稳定性。
+- 安全应用：应用前差异对比、撤销、恢复原文。
+- Provider Studio：服务地址、模型、连通性与兼容性诊断。
+- 本地安全密钥库：Windows 使用 DPAPI；Linux/macOS 后备实现使用 AES-256-GCM。
+- 加密历史与版本恢复、预设导入导出和分享。
+- 依赖哈希锁定、Git 历史密钥扫描、静态安全分析与 SBOM。
 
-![image](https://github.com/user-attachments/assets/f5391035-56a4-4a4f-9078-aedec4244af6)
+## 下载与安装
 
-## ✨ What is Writing Tools?
+1. 打开 [Releases](https://github.com/hzr666ABC/WritingTools/releases/latest)。
+2. 下载 `Writing.Tools.Windows.Custom.Release.zip`。
+3. 解压到一个固定且可写的目录。
+4. 运行 `Writing Tools CN.exe`。
 
-Writing Tools is an **Apple Intelligence-inspired application for Windows, Linux, and macOS that supercharges your writing with an AI LLM** (cloud-based or local).
+这是便携版应用。不要直接在 ZIP 压缩包内运行，也不要把程序放入需要管理员权限才能写入的目录。
 
-With one hotkey press system-wide, it lets you fix grammar, optimize text according to your instructions, summarize content (webpages, YouTube videos, etc.), and more.
+当前增强版主要面向 Windows 10/11。仓库仍保留上游 Linux 与 macOS 源码，但本项目发布的二进制仅针对 Windows。
 
-It's currently the **world's most intelligent system-wide grammar assistant**, works in ~any language, and has been featured in 🔥 [**28+ global publications**](https://github.com/theJayTea/WritingTools/blob/main/Media%20Coverage.md) ([Beebom](https://beebom.com/high-schooler-app-brings-apple-inteligence-writing-tools-windows/), [XDA](https://www.xda-developers.com/windows-pc-can-now-deliver-instant-free-writing-help-across-all-apps/), [How-To Geek](https://www.howtogeek.com/if-you-like-apple-intelligences-writing-tool-try-this-open-source-app-as-its-windows-counterpart/), [Neowin](https://www.neowin.net/news/apple-intelligence-writing-tools-for-windows-get-new-summarization-features-and-more/), [Windows Central](https://www.windowscentral.com/software-apps/can-apple-catch-up-apple-intelligence-just-shipped-yet-free-apple-writing-tools-on-github-for-windows-and-linux-make-a-better-alternative)...).
+## 快速使用
 
-Writing Tools was also among the 🔥 [**top 10 most trending AI programs in the world**](https://devface.ai/ranking/top_ai_developers/2024-10) on GitHub in October 2024.
+1. 从系统托盘打开设置。
+2. 选择 Gemini、OpenAI 兼容服务或 Ollama。
+3. 填写 API Key、服务地址和模型，然后运行兼容性测试。
+4. 在任意应用中选中文本。
+5. 按下主快捷键，选择预设；也可以启用“记住上次操作”直接执行。
 
----
+快捷弹窗支持方向键、Enter、Esc 和数字键快速选择。API Key 只应填写在应用的安全密钥库中，不要写入代码、Issue、日志或预设导出文件。
 
-Hi! I'm Jesai, a high school student from Bangalore, and I created and maintain Writing Tools with help from our [amazing contributors](https://github.com/theJayTea/WritingTools/edit/main/README.md#-contributors). I want to especially shout out [momokrono](https://github.com/momokrono), who's contributed extensively, and [Arya Mirsepasi](https://github.com/Aryamirsepasi), who built the entire macOS port!
+## 隐私与安全
 
-Writing Tools will always remain completely free and open-source.
+- API Key 在 Windows 上通过当前用户的 DPAPI 加密保存。
+- 历史正文加密保存在本地；部分用于列表展示的时间、类型等元数据可能保持明文。
+- 使用云端 Provider 时，用户选中的文本和提示词会发送给对应服务商处理。
+- 使用本地 Ollama 时，可将推理数据保留在本机。
+- 诊断报告默认对密钥、URL 凭据、用户目录和敏感路径进行脱敏。
+- 项目不附带任何开发者或用户的 API Key。
 
-If you find value in it, it would mean the world to me if you could support us as we continue to improve it. ❤️
+本地加密主要降低配置文件意外泄露风险，不能防御已经以同一系统用户权限运行的恶意程序。发现安全问题时，请按照 [SECURITY.md](SECURITY.md) 私下报告，不要先创建公开 Issue。
 
-<table>
-  <tr>
-    <td><b>Support Jesai</b> (Windows/Linux):</td>
-    <td><b>Support Arya</b> (macOS):</td>
-  </tr>
-  <tr>
-    <td><a href="https://www.buymeacoffee.com/jesaitarun" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;"></a></td>
-    <td><a href="http://buymeacoffee.com/aryamirsepasi" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;"></a></td>
-  </tr>
-</table>
+## 从源代码运行
 
----
+需要 Python 3.11 或兼容版本。Windows PowerShell 示例：
 
-## ⚡ What can I do with Writing Tools, exactly?
+```powershell
+cd Windows_and_Linux
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-lock.txt
+.\.venv\Scripts\python.exe main.py
+```
 
-### 1️⃣ Hyper-intelligent Writing Tools:
-- Select _any_ text on your PC and invoke Writing Tools with `ctrl+space`.
-- Choose **Proofread**, **Rewrite**, **Friendly**, **Professional**, **Concise**, or even enter **custom instructions** (e.g., _"add comments to this code"_, _"make it title case"_, _"translate to French"_).
-- Your text will instantly be replaced with the AI-optimized version. Use `ctrl+z` to revert.
+详细说明：
 
-### 2️⃣ Powerful content summarization that you can chat with:
-- Select all text in any webpage, document, email, etc., with `ctrl+a`, or select the transcript of a YouTube video (from its description).
-- Choose **Summary**, **Key Points**, or **Table** after invoking Writing Tools.
-- Get a pop-up summary with clear and beautiful formatting (with Markdown rendering), saving you hours.
-- Chat with the summary if you'd like to learn more or have questions.
+- [从源代码运行](README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
+- [构建 Windows 程序](README's%20Linked%20Content/To%20Compile%20the%20Application%20Yourself.md)
 
-### 3️⃣ Go wild with your own buttons!
-- They're your own magic buttons. Dream, and it'll magically be done with AI.
+## 开发与同步上游
 
-### 3️⃣ Chat with an LLM anytime in a click:
-- Press `ctrl+space` without selecting text to start a conversation with your LLM _(for privacy, chat history is deleted when you close the window)_.
+建议所有修改都在独立分支完成：
 
-## 🌟 Why Choose Writing Tools?
+```powershell
+git switch main
+git pull --ff-only origin main
+git switch -c feature/your-feature
+```
 
-Aside from being the only Windows/Linux program like Apple's Writing Tools, and the only way to use them on an Intel Mac or in the EU:
+同步原项目更新时，先在临时分支解决冲突和完成测试：
 
-- **More intelligent than Apple's Writing Tools and Grammarly Premium:** Apple uses a tiny 3B parameter model, while Writing Tools lets you use much more advanced models for free (e.g., Gemini 2.0 Flash [~30B]). Grammarly's rule-based NLP can't compete with LLMs.
-- **Completely free and open-source:** No subscriptions or hidden costs. Bloat-free and uses **~0% of your CPU** even when actively using it.
-- **Versatile AI LLM support:** Jump in quickly with the **free Gemini API & Gemini 2.0**, or an extensive range of **local LLMs** (via Ollama [[instructions]](https://github.com/theJayTea/WritingTools?tab=readme-ov-file#-optional-ollama-local-llm-instructions-for-windowslinux-v7-onwards), llama.cpp, KoboldCPP, TabbyAPI, vLLM, etc.) or **cloud-based LLMs** (ChatGPT, Mistral AI, etc.) through Writing Tools' OpenAI-API-compatibility.
-- **Does not mess with your clipboard, and works system-wide.**
-- **Privacy-focused**: Your API key and config files stay on *your* device. NO logging, diagnostic collection, tracking, or ads. Invoked *only* on your command. Local LLMs keep your data on your device & work without the internet.
-- **Supports multiple languages:** Works with any language and translates text better than Google Translate (type "translate to [language]" in `Describe your change...`).
-- **Code support:** Fix, improve, translate, or add comments to code with `Describe your change...`."
-- **Themes, Dark Mode, & Customization**: Choose between **2 themes**: a blurry gradient theme and a plain theme that resembles the Windows + V pop-up! Also has full **dark mode** support. **Set your own hotkey** for quick access.
+```powershell
+git fetch upstream
+git switch -c sync/upstream-next main
+git merge upstream/main
+```
 
-## ✅ **1 Minute Installation**
+通用修复会尽量拆分为独立 Pull Request 贡献给原项目；中文界面和具有明确产品定位的定制功能由本分支持续维护。
 
-### **🪟 Windows**:
-1. Go to the [Releases](https://github.com/theJayTea/WritingTools/releases) page and download the latest `Writing.Tools.zip` file.
-2. Extract it to your desired location (recommended: `Documents` or `App Data/Local`), run `Writing Tools.exe`, and enjoy! :D
+## 发布完整性
 
-*Note: Writing Tools is a portable app. If you extract it into a protected folder (e.g., Program Files), you must run it as administrator at least on first launch so it can create/edit its config files (in the same folder as its exe).*
+每个正式版本应同时提供：
 
-**PS: Go to Writing Tools' Settings (from its tray icon at the bottom right of the taskbar) to enable starting Writing Tools on boot.**
+- Windows ZIP 发布包；
+- CycloneDX SBOM；
+- SHA-256 校验清单；
+- 与二进制完全对应的 Git 标签和源代码。
 
-### **🐧 Linux (work-in-progress)**:
-[Run it from the source code](https://github.com/theJayTea/WritingTools/blob/main/README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
+发布前安全检查可在仓库根目录运行：
 
-Writing Tools works well on x11. On Wayland, there are a few caveats:
-- [it works on XWayland apps](https://github.com/theJayTea/WritingTools/issues/34#issuecomment-2461633556)
-- [and it works if you disable Wayland for individual Flatpaks with Flatseal.](https://github.com/theJayTea/WritingTools/issues/93#issuecomment-2576511041)
+```powershell
+python scripts/security_check.py --history
+```
 
-<a id="macos"></a>
-### 🍎 macOS
-The macOS version is a **native Swift port**, developed by [Arya Mirsepasi](https://github.com/Aryamirsepasi). View the [README inside the macOS folder](https://github.com/theJayTea/WritingTools/tree/main/macOS) to learn more.
+## 项目来源与许可证
 
-To install it:
-1. Go to the [Releases](https://github.com/theJayTea/WritingTools/releases) page and download the latest macOS `.dmg` file.
-2. Open the `.dmg` file, also open a Finder Window, and drag the `writing-tools.app` into the Applications folder. That's it!
+本项目修改自 [theJayTea/WritingTools](https://github.com/theJayTea/WritingTools)，感谢 Jesai、Arya Mirsepasi 以及所有上游贡献者。
 
-**Note:** macOS 14 or later is required due to accessibility API requirements.
-
----
-
-#### 💎 Why the macOS port is special
-
-- **Truly native**: Built in Swift (SwiftUI + AppKit where needed) for a fast, polished Mac experience.
-- **Private & on-device**: Run **local LLMs with MLX** on Apple Silicon — no internet required for on-device models.
-- **Rich-text aware**: **Proofread preserves RTF formatting** (bold, italics, lists, links) so your documents keep their look while errors disappear.
-- **Your workflows, your way**: **Edit and add your own commands** and assign custom shortcuts.
-- **Multilingual by design**: App UI supports **English, German, French, and Spanish**, and commands work in many more languages.
-- **Choice of intelligence**: Connect to top providers or go fully local — switch any time.
-- **Themes**: Multiple themes (including dark mode) to match your desktop vibe.
-
-#### 🧠 Providers & Models on macOS
-
-- Cloud: **OpenAI, Google (Gemini), Anthropic, Mistral, OpenRouter**  
-- Local: **Ollama** (via OpenAI-compatible endpoint) and **MLX on Apple Silicon** for first-class, low-latency on-device inference  
-- You can mix & match: keep sensitive work on-device with MLX, use cloud models when you need the biggest brains.
-
-#### 🖱️ System-wide magic on macOS
-
-- Works across most Mac apps — select text, invoke Writing Tools, and instantly **Proofread**, **Rewrite**, **Change tone**, or **Summarize**.
-- Start a **quick chat** with your chosen model without selecting text.
-
-> **Tip:** If your shortcut clashes with Spotlight or Input Source switching, set a custom hotkey in Writing Tools **and/or** adjust macOS settings under  
-> **System Settings → Keyboard → Keyboard Shortcuts** (Spotlight / Input Sources).
-
-#### 🔐 First-launch permissions (macOS)
-
-For full functionality, macOS will prompt you to grant:
-- **Accessibility** (to read/replace selected text)
-- **Screen Recording** (for certain apps that restrict text access)
-
-You can manage these under **System Settings → Privacy & Security**.
-
-#### ⚙️ Power features (macOS)
-
-- **Command editor**: Create reusable buttons for your own prompts and assign shortcuts.
-- **Model flexibility**: Bring your own API keys. Switch providers per task.
-- **Document-friendly**: RTF-preserving **Proofread** keeps your formatting intact.
-- **Localization**: UI in **EN/DE/FR/ES**; commands happily work with many languages.
-- **Theming**: Choose from multiple themes, including dark mode.
-
-#### 🧩 Troubleshooting (macOS)
-
-- **Hotkey not firing?** Change the shortcut in Writing Tools and make sure nothing else uses the same combo (Spotlight / Input Sources).  
-- **No text replacement in a specific app?** Ensure **Accessibility** is enabled for Writing Tools; for some apps, **Screen Recording** is also required.  
-- **Local model issues?** Confirm your Ollama/MLX model is running and the base URL/model name are correct in Settings.
-
----
-
-## 👀 Tips
-
-#### 1️⃣ Summarise a YouTube video from its transcript:
-
-https://github.com/user-attachments/assets/dd4780d4-7cdb-4bdb-9a64-e93520ab61be
-
-#### 2️⃣ Make Writing Tools work better in MS Word: the `ctrl+space` keyboard shortcut is mapped to "Clear Formatting", making you lose paragraph indentation. Here's how to improve this:
-P.S.: Word's rich-text formatting (bold, italics, underline, colours...) will be lost on using Writing Tools. A Markdown editor such as [Obsidian](https://obsidian.md/) has no such issue.
-
-https://github.com/user-attachments/assets/42a3d8c7-18ac-4282-9478-16aab935f35e
-
-## 🔒 Privacy
-
-I believe strongly in protecting your privacy. Writing Tools:
-- Does not collect or store any of your writing data by itself. It doesn't even collect general logs, so it's super light and privacy-friendly.
-- Lets you use local LLMs to process your text entirely on-device.
-- Only sends text to the chosen AI provider (encrypted) when you *explicitly* use one of the options.
-- Only stores your API key locally on your device.
-
-Note: If you choose to use a cloud based LLM, refer to the AI provider's privacy policy and terms of service.
-
-## ✨ Options Explained
-
-- **Proofread:** The smartest grammar & spelling corrector. Sorry not sorry, Grammarly Premium.
-- **Rewrite:** Improve the phrasing of your text.
-- **Make Friendly/Professional:** Adjust the tone of your text.
-- **Custom Instructions:** Tailor your request (e.g., "Translate to French") through `Describe your change...`.
-
-The following options respond in a pop-up window (with markdown rendering, selectable text, and a zoom level that saves & applies on app restarts):
-- **Summarize:** Create clear and concise summaries.
-- **Extract Key Points:** Highlight the most important points.
-- **Create Tables:** Convert text into a formatted table. PS: You can copy & paste the table into MS Word.
-
-## 🦙 (Optional) Ollama Local LLM Instructions [for Windows/Linux v7 onwards]:
-These instructions are for Writing Tools Windows/Linux v7+, using its native Ollama provider:
-1. [Download](https://ollama.com/download) and install Ollama.
-2. Choose an LLM from [here](https://ollama.com/library). Recommended: `Llama 3.1 8B` (~8GB RAM of VRAM required).
-3. Run `ollama pull llama3.1:8b` in your terminal to download it.
-4. Open Writing Tools Settings and simply select the Ollama AI Provider. The default model name is already `Llama 3.1 8B`.
-5. That's it! **Enjoy Writing Tools with _absolute_ privacy and no internet connection!** 🎉 From now on, you'll simply need to launch Ollama and Writing Tools into the background for it to work.
-
-## 🦙 (Optional) Ollama Local LLM Instructions:
-These instructions are for any Writing Tools version, using the OpenAI-Compatible provider:
-1. [Download](https://ollama.com/download) and install Ollama.
-2. Choose an LLM from [here](https://ollama.com/library). Recommended: `Llama 3.1 8B` (~8GB RAM of VRAM/RAM required).
-3. Run `ollama pull llama3.1:8b` in your terminal to download Llama 3.1.
-4. In Writing Tools, set the `OpenAI-Compatible` provider with:
-   - API Key: `ollama` (PS: For most local LLM providers, any random string here will suffice.)
-   - API Base URL: `http://localhost:11434/v1`
-   - API Model: `llama3.1:8b`
-5. That's it! **Enjoy Writing Tools with _absolute_ privacy and no internet connection!** 🎉 From now on, you'll simply need to launch Ollama and Writing Tools into the background for it to work.
-
-## 🐞 Known Issues
-1. (Being investigated) On some devices, Writing Tools does not work correctly with the default hotkey.
-   
-   To fix it, simply change the hotkey to **ctrl+`** or **ctrl+j** and restart Writing Tools. PS: If a hotkey is already in use by a program or background process, Writing Tools may not be able to intercept it. The above hotkeys are usually unused.
-
-2. The initial launch of the `Writing Tools.exe` might take unusually long — this seems to be because AV software extensively scans this new executable before letting it run. Once it launches into the background in RAM, it works instantly as usual.
-
-## 👨‍💻 To Run Writing Tools Directly from the Source Code
-
-[Instructions here!](https://github.com/theJayTea/WritingTools/blob/main/README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
-
-
-## 👨‍💻 To Compile the Application Yourself:
-
-[Instructions here!](https://github.com/theJayTea/WritingTools/blob/8713e5a5de63a7892b05a43b9753172e692768fb/README's%20Linked%20Content/To%20Compile%20the%20Application%20Yourself.md)
-
-## 🌟 Contributors
-
-Writing Tools would not be where it is today without its amazing contributors:
-
-### 🪟🐧 Windows & Linux version:
-**1. [momokrono](https://github.com/momokrono):**
-
-Added Linux support, switched to the pynput API to improve Windows stability. Added Ollama API support, the core logic for customisable buttons, and localization. Fixed misc. bugs and added graceful termination support by handling SIGINT signal.
-
-@momokrono has been incredibly kind and helpful, and I'm forever grateful to have him as a contributor. Not only has he provided extensive help with code, but he's also played a big role in managing GitHub issues. - Jesai
-
-**2. [Cameron Redmore (CameronRedmore)](https://github.com/CameronRedmore):**
-
-Extensively refactored Writing Tools and added OpenAI Compatible API support, streamed responses, and the chat mode when no text is selected.
-
-**3. [Soszust40 (Soszust40)](https://github.com/Soszust40):**
-
-Helped add dark mode, the plain theme, tray menu fixes, and UI improvements.
-
-**4. [Alok Saboo (arsaboo)](https://github.com/arsaboo):**
-
-Helped improve the reliability of text selection.
-
-**5. [raghavdhingra24](https://github.com/raghavdhingra24):**
-
-Made the rounded corners anti-aliased & prettier.
-
-**6. [ErrorCatDev](https://github.com/ErrorCatDev):**
-
-Significantly improved the About window, making it scrollable and cleaning things up. Also improved our .gitignore & requirements.txt.
-
-**7. [Vadim Karpenko](https://github.com/Vadim-Karpenko):**
-
-Helped add the start-on-boot setting!
-
-### 🍎 macOS version:
-#### A native Swift port created entirely by **[Arya Mirsepasi](https://github.com/Aryamirsepasi)**! This was a big endeavour and he's done an increadble job.
-
-Over so many emails, @Aryamirsepasi has been someone I truly look up to, and it's rare to find people as kind as him. We're incredibly grateful for all his contributions here! — Jesai
-
-**1. [Joaov41](https://github.com/Joaov41):**
-
-Developed the amazing picture processing functionality in Gemini for WritingTools, allowing the app to now work with images in addition to text!
-
-**2. [drankush](https://github.com/drankush):**
-
-Fixed an issue that caused the app to fail in completing requests when the OpenAI provider was configured with a custom Base URL (e.g., for Groq or other compatible services).
-
-**3. [gdmka](https://github.com/gdmka):**
-
-- Added the change that makes the ResponseView remember the user’s preferred text size across app launches. 
-- Implemented ability to set custom provider per each command. 
-
-
-## 🤝 Contributing
-
-I welcome contributions! :D
-
-If you'd like to improve Writing Tools, please feel free to open a Pull Request or get in touch with me (email below).
-
-If there are major changes on your mind, it may be a good idea to get in touch before working on it.
-
-## 📬 Contact
-
-Email: jesaitarun@gmail.com
-
-Made with ❤️ by a high school student. Check out my other app, [Bliss AI](https://play.google.com/store/apps/details?id=com.jesai.blissai), a free AI tutor!
-
-## 📄 License
-
-Distributed under the GNU General Public License v3.0.
+本项目继续按照 [GNU General Public License v3.0](LICENSE) 发布。分发修改后的二进制时，必须同时向用户提供对应源代码，并保留原项目的版权、许可证和修改说明。第三方组件信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
