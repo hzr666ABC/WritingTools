@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 
 from PySide6 import QtCore
@@ -6,8 +7,10 @@ from PySide6 import QtCore
 from single_instance import SingleInstanceGuard
 from WritingToolApp import WritingToolApp
 
-# Set up logging to console
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Keep production logs minimal. Developers can opt into DEBUG explicitly.
+_log_level_name = os.environ.get("WRITINGTOOLS_LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
+logging.basicConfig(level=_log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def main():

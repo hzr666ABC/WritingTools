@@ -168,12 +168,15 @@ https://github.com/user-attachments/assets/42a3d8c7-18ac-4282-9478-16aab935f35e
 ## 🔒 Privacy
 
 I believe strongly in protecting your privacy. Writing Tools:
-- Does not collect or store any of your writing data by itself. It doesn't even collect general logs, so it's super light and privacy-friendly.
+- Has no telemetry and does not upload general usage logs.
 - Lets you use local LLMs to process your text entirely on-device.
-- Only sends text to the chosen AI provider (encrypted) when you *explicitly* use one of the options.
-- Only stores your API key locally on your device.
+- Only sends selected text when you *explicitly* invoke an option, and only to the provider endpoint you configured.
+- Protects API keys locally with Windows DPAPI or an owner-only AES-256-GCM vault on Linux/macOS.
+- Can keep an encrypted local history for versioning and undo. You can disable or clear it from Settings; timestamps, provider/model, and preset names remain plaintext metadata.
+- Requires HTTPS for remote OpenAI-compatible endpoints that receive API keys. Plain HTTP is limited to loopback development endpoints.
 
 Note: If you choose to use a cloud based LLM, refer to the AI provider's privacy policy and terms of service.
+See [SECURITY.md](SECURITY.md) for the complete security model and private vulnerability reporting instructions.
 
 ## ✨ Options Explained
 
@@ -215,12 +218,12 @@ These instructions are for any Writing Tools version, using the OpenAI-Compatibl
 
 ## 👨‍💻 To Run Writing Tools Directly from the Source Code
 
-[Instructions here!](https://github.com/theJayTea/WritingTools/blob/main/README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
+[Instructions here!](README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
 
 
 ## 👨‍💻 To Compile the Application Yourself:
 
-[Instructions here!](https://github.com/theJayTea/WritingTools/blob/8713e5a5de63a7892b05a43b9753172e692768fb/README's%20Linked%20Content/To%20Compile%20the%20Application%20Yourself.md)
+[Instructions here!](README's%20Linked%20Content/To%20Compile%20the%20Application%20Yourself.md)
 
 ## 🌟 Contributors
 

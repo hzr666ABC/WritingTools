@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from prompting import normalize_options, option_display_name
+from preset_share import export_preset_pack, load_preset_pack, merge_presets
 from preset_icon_library import PRESET_ICON_CHOICES, normalize_preset_icon
 from ui.ShortcutRecorder import ShortcutRecorder
 from ui.UIUtils import ThemeBackground, colorMode
@@ -526,6 +527,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.input_area = None
         self.actions_container = None
         self.actions_layout = None
+        self.preset_share_surface = None
         self.last_action_label = None
         self.remember_checkbox = None
         self.selected_index = 0
@@ -723,6 +725,33 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.rebuild_grid_layout()
         self.update_last_action_label()
 
+        self.preset_share_surface = QWidget()
+        share_layout = QHBoxLayout(self.preset_share_surface)
+        share_layout.setContentsMargins(0, 0, 0, 0)
+        share_layout.setSpacing(8)
+        import_button = QPushButton("导入预设包")
+        export_button = QPushButton("导出并分享")
+        share_button_style = f"""
+            QPushButton {{
+                min-height: 34px;
+                padding: 4px 10px;
+                border: 1px solid {'#555d72' if colorMode == 'dark' else '#dfe2ea'};
+                border-radius: 9px;
+                background: {'rgba(255,255,255,12)' if colorMode == 'dark' else '#f8f9fc'};
+                color: {'#e8ebf8' if colorMode == 'dark' else '#51586f'};
+                font-size: 12px;
+            }}
+            QPushButton:hover {{ border-color: #7f8cff; background: {'#373d4b' if colorMode == 'dark' else '#eef1ff'}; }}
+        """
+        import_button.setStyleSheet(share_button_style)
+        export_button.setStyleSheet(share_button_style)
+        import_button.clicked.connect(self.import_presets)
+        export_button.clicked.connect(self.export_presets)
+        share_layout.addWidget(import_button)
+        share_layout.addWidget(export_button)
+        self.preset_share_surface.hide()
+        content_layout.addWidget(self.preset_share_surface)
+
         remember_surface = QWidget()
         remember_surface.setObjectName("rememberSurface")
         remember_surface.setStyleSheet(f"""
@@ -917,6 +946,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.close_button.hide()
             self.reset_button.show()
             self.drag_label.show()
+            self.preset_share_surface.show()
 
         else:
             # Switch back to normal (non-edit) mode:
@@ -929,6 +959,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.close_button.show()
             self.reset_button.hide()
             self.drag_label.hide()
+            self.preset_share_surface.hide()
 
             self.refresh_runtime_options()
 
@@ -950,8 +981,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
             btn.shortcut_badge.setVisible(not self.edit_mode)
             try:
                 btn.clicked.disconnect()
-            except:
-                pass
+            except (RuntimeError, TypeError):
+                logging.debug("Preset button had no signal connection to disconnect")
 
             if not self.edit_mode:
                 btn.clicked.connect(partial(self.on_generic_instruction, btn.key))
@@ -968,6 +999,70 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # Rebuild grid layout
         self.rebuild_grid_layout()
+
+    def export_presets(self):
+        """Export a versioned, secret-free preset pack as UTF-8 JSON."""
+        default_path = os.path.join(
+            QtCore.QStandardPaths.writableLocation(
+                QtCore.QStandardPaths.StandardLocation.DocumentsLocation
+            ),
+            "写作工具预设包.json",
+        )
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "导出预设包", default_path, "Writing Tools 预设包 (*.json)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        try:
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(
+                    export_preset_pack(self.load_options()),
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                handle.write("\n")
+            QtWidgets.QMessageBox.information(
+                self,
+                "导出完成",
+                "预设包已保存。文件只包含预设名称、提示词、图标和快捷键，不包含 API 密钥。",
+            )
+        except Exception as error:
+            QtWidgets.QMessageBox.warning(self, "导出失败", str(error))
+
+    def import_presets(self):
+        """Validate and merge a shared preset pack without overwriting local presets."""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "导入预设包",
+            QtCore.QStandardPaths.writableLocation(
+                QtCore.QStandardPaths.StandardLocation.DocumentsLocation
+            ),
+            "Writing Tools 预设包 (*.json);;JSON 文件 (*.json)",
+        )
+        if not path:
+            return
+        try:
+            imported = load_preset_pack(path)
+            merged, notices = merge_presets(
+                self.load_options(),
+                imported,
+                self.app.config.get("shortcut", "ctrl+space"),
+            )
+            self.save_options(merged)
+            self.refresh_runtime_options()
+            self.build_buttons_list()
+            self.rebuild_grid_layout()
+            summary = f"已安全导入 {len(imported)} 个预设；同名预设会自动重命名。"
+            if notices:
+                summary += "\n\n" + "\n".join(notices[:6])
+                if len(notices) > 6:
+                    summary += f"\n另有 {len(notices) - 6} 条快捷键冲突已自动处理。"
+            QtWidgets.QMessageBox.information(self, "导入完成", summary)
+        except (OSError, ValueError) as error:
+            QtWidgets.QMessageBox.warning(self, "导入失败", str(error))
 
 
     def on_reset_clicked(self):

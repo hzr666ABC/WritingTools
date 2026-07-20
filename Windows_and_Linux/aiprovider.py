@@ -45,6 +45,9 @@ from openai import OpenAI
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtWidgets import QVBoxLayout
 from ui.UIUtils import colorMode
+from secure_storage import protect_secret, unprotect_secret
+from secure_storage import redact_text
+from provider_studio import OPENAI_COMPATIBLE, validate_base_url
 
 # Obfuscation prefix to identify encrypted API keys
 _OBFUSCATION_PREFIX = "enc:"
@@ -56,10 +59,7 @@ def obfuscate_api_key(key: str) -> str:
     Obfuscate an API key using XOR + Base64 encoding.
     Returns the obfuscated string with 'enc:' prefix.
     """
-    if not key or key.startswith(_OBFUSCATION_PREFIX):
-        return key  # Already obfuscated or empty
-    xored = bytes([b ^ _XOR_KEY for b in key.encode('utf-8')])
-    return _OBFUSCATION_PREFIX + base64.b64encode(xored).decode('ascii')
+    return protect_secret(key)
 
 
 def deobfuscate_api_key(obfuscated: str) -> str:
@@ -67,11 +67,7 @@ def deobfuscate_api_key(obfuscated: str) -> str:
     Deobfuscate an API key that was obfuscated with obfuscate_api_key().
     If the key doesn't have the 'enc:' prefix, returns it as-is (plaintext).
     """
-    if not obfuscated or not obfuscated.startswith(_OBFUSCATION_PREFIX):
-        return obfuscated  # Not obfuscated, return as-is
-    encoded = obfuscated[len(_OBFUSCATION_PREFIX):]
-    xored = base64.b64decode(encoded)
-    return bytes([b ^ _XOR_KEY for b in xored]).decode('utf-8')
+    return unprotect_secret(obfuscated)
 
 
 class AIProviderSetting(ABC):
@@ -126,7 +122,28 @@ class TextSetting(AIProviderSetting):
             border-radius: 9px;
         """)
         self.input.setPlaceholderText(self.description)
-        row_layout.addWidget(self.input)
+        if self.name == "api_key":
+            self.input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+            secret_row = QtWidgets.QHBoxLayout()
+            secret_row.setSpacing(7)
+            secret_row.addWidget(self.input, 1)
+            reveal_button = QtWidgets.QPushButton("显示")
+            reveal_button.setCheckable(True)
+            reveal_button.setFixedWidth(58)
+            reveal_button.setToolTip("仅在按住/开启时显示本机密钥")
+
+            def toggle_secret(checked):
+                self.input.setEchoMode(
+                    QtWidgets.QLineEdit.EchoMode.Normal
+                    if checked else QtWidgets.QLineEdit.EchoMode.Password
+                )
+                reveal_button.setText("隐藏" if checked else "显示")
+
+            reveal_button.toggled.connect(toggle_secret)
+            secret_row.addWidget(reveal_button)
+            row_layout.addLayout(secret_row)
+        else:
+            row_layout.addWidget(self.input)
         layout.addLayout(row_layout)
 
     def set_value(self, value):
@@ -307,10 +324,14 @@ class AIProvider(ABC):
         """
         Load configuration settings into the provider.
         """
+        config = dict(config or {})
         for setting in self.settings:
             if setting.name in config:
-                setattr(self, setting.name, config[setting.name])
-                setting.set_value(config[setting.name])
+                value = config[setting.name]
+                if setting.name == "api_key":
+                    value = unprotect_secret(value)
+                setattr(self, setting.name, value)
+                setting.set_value(value)
             else:
                 setattr(self, setting.name, setting.default_value)
         self.after_load()
@@ -321,7 +342,10 @@ class AIProvider(ABC):
         """
         config = {}
         for setting in self.settings:
-            config[setting.name] = setting.get_value()
+            value = setting.get_value()
+            if setting.name == "api_key":
+                value = protect_secret(value)
+            config[setting.name] = value
         self.app.config["providers"][self.provider_name] = config
         self.app.save_config(self.app.config)
 
@@ -481,13 +505,13 @@ class GeminiProvider(AIProvider):
 
             response_text = (response.text or "").rstrip('\n')
 
-            if not return_response and not hasattr(self.app, 'current_response_window'):
+            if not return_response and getattr(self.app, 'current_response_window', None) is None:
                 self.app.output_ready_signal.emit(response_text)
-                self.app.replace_text(True)
                 return ""
             return response_text
         except Exception as e:
-            logging.error(f"Error processing Gemini response: {e}")
+            safe_error = redact_text(str(e), [getattr(self, "api_key", "")])
+            logging.error(f"Error processing Gemini response: {safe_error}")
             self.app.output_ready_signal.emit("An error occurred while processing the response.")
             return ""
         finally:
@@ -497,25 +521,13 @@ class GeminiProvider(AIProvider):
         """
         Load configuration, deobfuscating the API key if needed.
         """
-        # Deobfuscate API key before loading
-        if 'api_key' in config:
-            config = config.copy()  # Don't modify the original
-            config['api_key'] = deobfuscate_api_key(config['api_key'])
         super().load_config(config)
 
     def save_config(self):
         """
         Save configuration, obfuscating the API key for storage.
         """
-        config = {}
-        for setting in self.settings:
-            value = setting.get_value()
-            # Obfuscate API key before saving
-            if setting.name == 'api_key':
-                value = obfuscate_api_key(value)
-            config[setting.name] = value
-        self.app.config["providers"][self.provider_name] = config
-        self.app.save_config(self.app.config)
+        super().save_config()
 
     def after_load(self):
         """
@@ -575,6 +587,7 @@ class OpenAICompatibleProvider(AIProvider):
             ]
 
         try:
+            validate_base_url(OPENAI_COMPATIBLE, self.api_base)
             response = self.client.chat.completions.create(
                 model=self.api_model,
                 messages=messages,
@@ -583,12 +596,12 @@ class OpenAICompatibleProvider(AIProvider):
             )
             response_text = response.choices[0].message.content.strip()
 
-            if not return_response and not hasattr(self.app, 'current_response_window'):
+            if not return_response and getattr(self.app, 'current_response_window', None) is None:
                 self.app.output_ready_signal.emit(response_text)
             return response_text
 
         except Exception as e:
-            error_str = str(e)
+            error_str = redact_text(str(e), [getattr(self, "api_key", "")])
             logging.error(f"Error while generating content: {error_str}")
             if "exceeded" in error_str or "rate limit" in error_str:
                 self.app.show_message_signal.emit(
@@ -656,12 +669,13 @@ class OllamaProvider(AIProvider):
         try:
             response = self.client.chat(model=self.api_model, messages=messages)
             response_text = response['message']['content'].strip()
-            if not return_response and not hasattr(self.app, 'current_response_window'):
+            if not return_response and getattr(self.app, 'current_response_window', None) is None:
                 self.app.output_ready_signal.emit(response_text)
             return response_text
         except Exception as e:
-            logging.error(f"Error during Ollama chat: {e}")
-            self.app.show_message_signal.emit("错误", f"Ollama 处理时发生错误：{e}")
+            safe_error = redact_text(str(e))
+            logging.error(f"Error during Ollama chat: {safe_error}")
+            self.app.show_message_signal.emit("错误", f"Ollama 处理时发生错误：{safe_error}")
             return ""
 
     def after_load(self):

@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import sys
+import tempfile
 import threading
 import time
 
@@ -11,10 +12,14 @@ import darkdetect
 import pyperclip
 import ui.AboutWindow
 import ui.CustomPopupWindow
+import ui.DiagnosticsWindow
+import ui.HistoryWindow
 import ui.OnboardingWindow
 import ui.ResponseWindow
+import ui.SafeApplyWindow
 import ui.SettingsWindow
-from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
+from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider
+from history_store import HistoryStore
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
@@ -22,6 +27,8 @@ from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from prompting import compose_system_instruction, normalize_options, option_display_name
 from quick_action_workflow import bottom_right_position, resolve_remembered_option
+from secure_storage import protect_secret, redact_text, unprotect_secret
+from text_application import activate_window, capture_foreground_window
 from ui.i18n import translate
 from update_checker import UpdateChecker
 
@@ -69,12 +76,22 @@ class WritingToolApp(QtWidgets.QApplication):
         self.options = None
         self.options_path = None
         self.load_options()
+        self.history_store = HistoryStore(
+            os.path.join(os.path.dirname(sys.argv[0]), 'history.json'),
+            max_entries=self.config.get('history_max_entries', 100) if self.config else 100,
+        )
         self.onboarding_window = None
         self.popup_window = None
         self.tray_icon = None
         self.tray_menu = None
         self.settings_window = None
         self.about_window = None
+        self.safe_apply_window = None
+        self.history_window = None
+        self.diagnostics_window = None
+        self.source_window_handle = None
+        self.pending_option = ""
+        self.pending_original = ""
         self.registered_hotkey = None
         self.output_queue = ""
         self.last_replace = 0
@@ -213,6 +230,9 @@ class WritingToolApp(QtWidgets.QApplication):
             'last_used_option': 'Proofread',
             'popup_position': 'bottom_right',
             'custom_background_path': '',
+            'safe_apply_enabled': True,
+            'history_enabled': True,
+            'history_max_entries': 100,
         }
         changed = False
         for key, value in defaults.items():
@@ -232,8 +252,8 @@ class WritingToolApp(QtWidgets.QApplication):
     def _migrate_config(self):
         """
         One-shot config migration. Catches any user up to the current schema
-        (v9) regardless of where they started — v7, v8, or already current —
-        in a single pass with at most one restart.
+        (v10) regardless of where they started — v7, v8, or already current —
+        in a single pass without forcing a restart.
 
         Each version is gated on its own `is_config_file_updated_for_v{N}`
         flag, so re-running this is a no-op once everything's caught up.
@@ -257,8 +277,12 @@ class WritingToolApp(QtWidgets.QApplication):
             who picked, say, `gemini-3.1-pro-preview` doesn't get reset.
           • SDK migration to `google-genai` is code-side only; nothing to
             do in config.
+
+        v10 (custom build):
+          • Migrate every provider API key to Windows DPAPI.
+          • Enable safe apply and encrypted history defaults.
         """
-        CURRENT_CONFIG_VERSION = 9
+        CURRENT_CONFIG_VERSION = 10
         # Default for new installs and migrating users.
         NEW_DEFAULT_MODEL = 'gemini-flash-latest'
         # v8 -> v9 model mapping. Every retired preset is bumped to the new
@@ -278,12 +302,16 @@ class WritingToolApp(QtWidgets.QApplication):
 
         needs_v8 = not self.config.get('is_config_file_updated_for_v8', False)
         needs_v9 = not self.config.get('is_config_file_updated_for_v9', False)
+        needs_v10 = not self.config.get('is_config_file_updated_for_v10', False)
 
-        if not needs_v8 and not needs_v9:
+        if not needs_v8 and not needs_v9 and not needs_v10:
             logging.debug('Config already up-to-date, no migration needed')
             return
 
-        logging.info(f'Running config migration (needs_v8={needs_v8}, needs_v9={needs_v9})...')
+        logging.info(
+            f'Running config migration (needs_v8={needs_v8}, needs_v9={needs_v9}, '
+            f'needs_v10={needs_v10})...'
+        )
 
         config_changed = False
         gemini_config = (
@@ -308,7 +336,7 @@ class WritingToolApp(QtWidgets.QApplication):
                 # unchanged.
                 api_key = gemini_config.get('api_key', '')
                 if api_key:
-                    new_key = obfuscate_api_key(api_key)
+                    new_key = protect_secret(api_key)
                     if new_key != api_key:
                         gemini_config['api_key'] = new_key
                         logging.info('[v8] Obfuscated plaintext Gemini API key')
@@ -325,6 +353,25 @@ class WritingToolApp(QtWidgets.QApplication):
                     logging.info(f'[v9] Bumped Gemini model "{old_model}" -> "{new_model}"')
                     config_changed = True
 
+        if needs_v10:
+            for provider_config in self.config.get('providers', {}).values():
+                if not isinstance(provider_config, dict):
+                    continue
+                api_key = provider_config.get('api_key', '')
+                if not api_key:
+                    continue
+                try:
+                    protected_key = protect_secret(unprotect_secret(api_key))
+                except Exception as error:
+                    logging.error(f'Unable to migrate an API key to DPAPI: {error}')
+                    continue
+                if protected_key != api_key:
+                    provider_config['api_key'] = protected_key
+                    config_changed = True
+            self.config.setdefault('safe_apply_enabled', True)
+            self.config.setdefault('history_enabled', True)
+            self.config.setdefault('history_max_entries', 100)
+
         # Stamp every version flag up to current so we never re-run on
         # subsequent startups, even if no fields actually needed changing
         # (e.g., a v8 user who'd already picked a custom non-deprecated model).
@@ -334,16 +381,8 @@ class WritingToolApp(QtWidgets.QApplication):
         self.save_config(self.config)
         logging.info('Config migration complete')
 
-        # Single restart popup, regardless of how many versions we jumped.
         if config_changed:
-            # Use QMessageBox directly — signals aren't connected yet at this
-            # point in __init__.
-            QMessageBox.information(
-                None,
-                '写作工具已更新',
-                '配置文件已升级为当前格式。\n\n请重新启动写作工具。'
-            )
-            sys.exit(0)
+            logging.info('Configuration data was upgraded without requiring a restart')
 
     def load_options(self):
         """
@@ -363,10 +402,39 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         Save the configuration file.
         """
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
+        directory = os.path.dirname(self.config_path) or "."
+        os.makedirs(directory, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                newline="\n",
+                dir=directory,
+                prefix=".writing-tools-config-",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary = handle.name
+                json.dump(config, handle, indent=4, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.name != "nt":
+                os.chmod(temporary, 0o600)
+            os.replace(temporary, self.config_path)
             logging.debug('Config saved successfully')
+        finally:
+            if temporary and os.path.exists(temporary):
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
         self.config = config
+
+    def _safe_error_text(self, error):
+        provider = getattr(self, "current_provider", None)
+        secret = getattr(provider, "api_key", "") if provider else ""
+        return redact_text(str(error), [secret])
 
     def show_onboarding(self):
         """
@@ -515,6 +583,7 @@ class WritingToolApp(QtWidgets.QApplication):
             logging.warning(f'Button "{button_name}" no longer exists; ignoring hotkey')
             return
 
+        self.source_window_handle = capture_foreground_window()
         self.current_text_holder = _SelectedTextHolder()
         self._fire_ctrl_c_and_capture_async(self.current_text_holder)
 
@@ -574,6 +643,7 @@ class WritingToolApp(QtWidgets.QApplication):
         # Fresh holder per popup. Fire Ctrl+C *before* we create the popup
         # so the keystroke is queued while focus is still on the user's
         # source app — the actual clipboard read happens in the background.
+        self.source_window_handle = capture_foreground_window()
         self.current_text_holder = _SelectedTextHolder()
         self._fire_ctrl_c_and_capture_async(self.current_text_holder)
 
@@ -640,8 +710,9 @@ class WritingToolApp(QtWidgets.QApplication):
         kbrd = pykeyboard.Controller()
         try:
             kbrd.press(pykeyboard.Key.ctrl.value)
-            kbrd.press('c')
-            kbrd.release('c')
+            copy_key = pykeyboard.KeyCode.from_vk(0x43) if os.name == 'nt' else 'c'
+            kbrd.press(copy_key)
+            kbrd.release(copy_key)
             kbrd.release(pykeyboard.Key.ctrl.value)
         except Exception as e:
             logging.error(f'Error simulating Ctrl+C: {e}')
@@ -764,6 +835,9 @@ class WritingToolApp(QtWidgets.QApplication):
             self.show_message_signal.emit('错误', '请先选择要处理的文字。')
             return
 
+        self.pending_option = option
+        self.pending_original = selected_text
+
         if self.options[option]['open_in_window']:
             QtCore.QMetaObject.invokeMethod(
                 self,
@@ -792,6 +866,15 @@ class WritingToolApp(QtWidgets.QApplication):
                 logging.debug(f'Got response of length: {len(response) if response else 0}')
 
                 if hasattr(self, 'current_response_window'):
+                    if response and self.config.get('history_enabled', True):
+                        self.history_store.add_entry(
+                            option=option,
+                            original=selected_text,
+                            result=response,
+                            provider=self.current_provider.provider_name,
+                            model=self._current_model_name(),
+                            status='viewed',
+                        )
                     # noinspection PyTypeChecker
                     QtCore.QMetaObject.invokeMethod(
                         self.current_response_window,
@@ -806,12 +889,13 @@ class WritingToolApp(QtWidgets.QApplication):
                 logging.debug('Response processed')
 
         except Exception as e:
-            logging.error(f'An error occurred: {e}', exc_info=True)
+            safe_error = self._safe_error_text(e)
+            logging.error(f'An error occurred: {safe_error}')
 
             if "Resource has been exhausted" in str(e):
                 self.show_message_signal.emit('请求频率受限', 'Gemini API 已达到每分钟请求上限，请稍后再试。若经常发生，请在设置中切换到配额更高的模型。')
             else:
-                self.show_message_signal.emit('错误', f'处理时发生错误：{e}')
+                self.show_message_signal.emit('错误', f'处理时发生错误：{safe_error}')
 
     @Slot(str, str)
     def show_message_box(self, title, message):
@@ -831,64 +915,105 @@ class WritingToolApp(QtWidgets.QApplication):
         return response_window
 
     def replace_text(self, new_text):
-        """
-        Replaces the text by pasting in the LLM generated text. With "Key Points" and "Summary", invokes a window with the output instead.
-        """
+        """Route generated text through safe preview or direct application."""
         error_message = 'ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST'
-
-        # Confirm new_text exists and is a string
-        if new_text and isinstance(new_text, str):
-            self.output_queue += new_text
-            current_output = self.output_queue.strip()  # Strip whitespace for comparison
-
-            # If the new text is the error message, show a message box
-            if current_output == error_message:
-                self.show_message_signal.emit('错误', '所选文字不适用于当前预设。')
-                return
-
-            # Check if we're building up to the error message (to prevent partial pasting)
-            if len(current_output) <= len(error_message):
-                clean_current = ''.join(current_output.split())
-                clean_error = ''.join(error_message.split())
-                if clean_current == clean_error[:len(clean_current)]:
-                    return
-
-            logging.debug('Processing output text')
-            try:
-                # For Summary and Key Points, show in response window
-                if hasattr(self, 'current_response_window'):
-                    self.current_response_window.append_text(new_text)
-                    
-                    # If this is the initial response, add it to chat history
-                    if len(self.current_response_window.chat_history) == 1:  # Only original text exists
-                        self.current_response_window.chat_history.append({
-                            "role": "assistant",
-                            "content": self.output_queue.rstrip('\n')
-                        })
-                else:
-                    # For other options, use the original clipboard-based replacement
-                    clipboard_backup = pyperclip.paste()
-                    cleaned_text = self.output_queue.rstrip('\n')
-                    pyperclip.copy(cleaned_text)
-                    
-                    kbrd = pykeyboard.Controller()
-                    def press_ctrl_v():
-                        kbrd.press(pykeyboard.Key.ctrl.value)
-                        kbrd.press('v')
-                        kbrd.release('v')
-                        kbrd.release(pykeyboard.Key.ctrl.value)
-
-                    press_ctrl_v()
-                    time.sleep(0.2)
-                    pyperclip.copy(clipboard_backup)
-
-                if not hasattr(self, 'current_response_window'):
-                    self.output_queue = ""
-
-            except Exception as e:
-                logging.error(f'Error processing output: {e}')
-        else:
+        if not new_text or not isinstance(new_text, str):
             logging.debug('No new text to process')
+            return
+        cleaned_text = new_text.rstrip('\n')
+        if cleaned_text.strip() == error_message:
+            self.show_message_signal.emit('错误', '所选文字不适用于当前预设。')
+            return
+
+        original = self.pending_original or (
+            self.current_text_holder.text if self.current_text_holder else ''
+        )
+        if self.config.get('history_enabled', True):
+            entry = self.history_store.add_entry(
+                option=self.pending_option or '写作',
+                original=original,
+                result=cleaned_text,
+                provider=self.current_provider.provider_name,
+                model=self._current_model_name(),
+                status='preview' if self.config.get('safe_apply_enabled', True) else 'applied',
+            )
+        else:
+            entry = {
+                'id': '',
+                'option': self.pending_option or '写作',
+                'original': original,
+                'result': cleaned_text,
+                'version': 1,
+            }
+
+        if self.config.get('safe_apply_enabled', True):
+            if self.safe_apply_window is not None:
+                self.safe_apply_window.close()
+            self.safe_apply_window = ui.SafeApplyWindow.SafeApplyWindow(self, entry)
+            self.safe_apply_window.show()
+            self.safe_apply_window.raise_()
+            self.safe_apply_window.activateWindow()
+        else:
+            self.apply_text_to_source(cleaned_text)
+        self.output_queue = ""
+
+    def _current_model_name(self):
+        provider = getattr(self, 'current_provider', None)
+        if provider is None:
+            return ''
+        return str(
+            getattr(provider, 'model_name', '')
+            or getattr(provider, 'api_model', '')
+            or ''
+        ).strip()
+
+    def apply_text_to_source(self, text):
+        """Activate the captured source window and paste one complete version."""
+        if not isinstance(text, str) or not text:
+            return False
+        try:
+            clipboard_backup = pyperclip.paste()
+        except Exception:
+            clipboard_backup = ''
+        pyperclip.copy(text)
+        if not self.source_window_handle:
+            logging.warning('No source window handle is available; left result on clipboard')
+            return False
+
+        activate_window(self.source_window_handle)
+        time.sleep(0.16)
+        try:
+            kbrd = pykeyboard.Controller()
+            paste_key = pykeyboard.KeyCode.from_vk(0x56) if os.name == 'nt' else 'v'
+            kbrd.press(pykeyboard.Key.ctrl.value)
+            kbrd.press(paste_key)
+            kbrd.release(paste_key)
+            kbrd.release(pykeyboard.Key.ctrl.value)
+            time.sleep(0.22)
+            pyperclip.copy(clipboard_backup)
+            return True
+        except Exception as error:
+            logging.error(f'Unable to apply text to source window: {error}')
+            pyperclip.copy(text)
+            return False
+
+    @Slot()
+    def show_history(self):
+        if self.history_window is not None:
+            self.history_window.close()
+        self.history_window = ui.HistoryWindow.HistoryWindow(self)
+        self.history_window.show()
+        self.history_window.raise_()
+        self.history_window.activateWindow()
+
+    @Slot()
+    def show_diagnostics(self):
+        if self.diagnostics_window is not None:
+            self.diagnostics_window.close()
+        self.diagnostics_window = ui.DiagnosticsWindow.DiagnosticsWindow(self)
+        self.diagnostics_window.show()
+        self.diagnostics_window.raise_()
+        self.diagnostics_window.activateWindow()
 
     def create_tray_icon(self):
         """
@@ -928,6 +1053,12 @@ class WritingToolApp(QtWidgets.QApplication):
         # Settings menu item
         settings_action = self.tray_menu.addAction(self._('Settings'))
         settings_action.triggered.connect(self.show_settings)
+
+        history_action = self.tray_menu.addAction('历史与版本')
+        history_action.triggered.connect(self.show_history)
+
+        diagnostics_action = self.tray_menu.addAction('兼容性诊断')
+        diagnostics_action.triggered.connect(self.show_diagnostics)
 
         # Pause/Resume toggle action 
         self.toggle_action = self.tray_menu.addAction(self._('Resume') if self.paused else self._('Pause'))
@@ -1097,13 +1228,14 @@ class WritingToolApp(QtWidgets.QApplication):
                 self.followup_response_signal.emit(response_text)
 
             except Exception as e:
-                logging.error(f'Error processing follow-up question: {e}', exc_info=True)
+                safe_error = self._safe_error_text(e)
+                logging.error(f'Error processing follow-up question: {safe_error}')
 
                 if "Resource has been exhausted" in str(e):
                     self.show_message_signal.emit('请求频率受限', 'Gemini API 已达到每分钟请求上限，请稍后再试。')
                     self.followup_response_signal.emit("抱歉，处理追问时发生错误。")
                 else:
-                    self.show_message_signal.emit('错误', f'处理时发生错误：{e}')
+                    self.show_message_signal.emit('错误', f'处理时发生错误：{safe_error}')
                     self.followup_response_signal.emit("抱歉，处理追问时发生错误。")
 
         # Start the thread

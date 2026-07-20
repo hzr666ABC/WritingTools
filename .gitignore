@@ -2,6 +2,31 @@
 
 .DS_Store
 Windows_and_Linux/config.json
+Windows_and_Linux/history.json
+Windows_and_Linux/*.tmp
+Windows_and_Linux/*.log
+Windows_and_Linux/dist/
+Windows_and_Linux/build/
+Windows_and_Linux/*.spec
+
+# Local secrets, credentials, and private certificates
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+
+# Local build/release artifacts
+*.exe
+*.msi
+*.zip
+*.7z
+*.tar
+*.gz
 
 .idea
 **/__pycache__

@@ -2,6 +2,7 @@ import logging
 import threading
 import time
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import URLError, urlopen
 
 CURRENT_VERSION = 8
@@ -18,7 +19,12 @@ class UpdateChecker:
         Returns the version number or None if failed.
         """
         try:
-            with urlopen(UPDATE_CHECK_URL, timeout=5) as response:
+            parsed = urlsplit(UPDATE_CHECK_URL)
+            if parsed.scheme != "https" or parsed.hostname != "raw.githubusercontent.com":
+                logging.error("Refusing an untrusted update-check URL")
+                return None
+            # B310 is safe here because both scheme and host are allowlisted above.
+            with urlopen(UPDATE_CHECK_URL, timeout=5) as response:  # nosec B310
                 data = response.read().decode('utf-8').strip()
                 try:
                     return int(data)

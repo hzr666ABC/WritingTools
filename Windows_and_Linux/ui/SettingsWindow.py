@@ -1,8 +1,10 @@
 import os
 import sys
+import threading
 
-from aiprovider import AIProvider
+from aiprovider import AIProvider, ClickActivatedComboBox, DropdownSetting, TextSetting
 from prompting import option_display_name
+from provider_studio import probe_provider, validate_base_url
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
@@ -20,6 +22,7 @@ class SettingsWindow(QtWidgets.QWidget):
     Now with scrolling support for better usability on smaller screens.
     """
     close_signal = QtCore.Signal()
+    provider_probe_ready = QtCore.Signal(object)
 
     def __init__(self, app, providers_only=False):
         super().__init__()
@@ -44,6 +47,12 @@ class SettingsWindow(QtWidgets.QWidget):
         self.custom_radio = None
         self.custom_background_input = None
         self.background_preview = None
+        self.safe_apply_checkbox = None
+        self.history_checkbox = None
+        self.provider_probe_button = None
+        self.provider_probe_status = None
+        self.provider_model_picker = None
+        self.provider_probe_ready.connect(self._finish_provider_probe)
         self.init_ui()
         self.retranslate_ui()
 
@@ -121,8 +130,107 @@ class SettingsWindow(QtWidgets.QWidget):
             setting.set_value(provider_values.get(setting.name, setting.default_value))
             setting.render_to_layout(self.current_provider_layout)
 
+        studio_heading = QtWidgets.QLabel("Provider Studio")
+        studio_heading.setStyleSheet(
+            f"font-size: 14px; font-weight: 650; margin-top: 8px; color: {'#eef0ff' if colorMode == 'dark' else '#343746'};"
+        )
+        self.current_provider_layout.addWidget(studio_heading)
+        studio_hint = QtWidgets.QLabel(
+            "验证地址与密钥，测量延迟，并从服务端读取可用模型。检测过程不会保存或上传密钥。"
+        )
+        studio_hint.setWordWrap(True)
+        studio_hint.setStyleSheet(
+            f"font-size: 12px; color: {'#b8bed4' if colorMode == 'dark' else '#6f7589'};"
+        )
+        self.current_provider_layout.addWidget(studio_hint)
+
+        studio_row = QtWidgets.QHBoxLayout()
+        self.provider_probe_button = QtWidgets.QPushButton("检测连接并获取模型")
+        self.provider_probe_button.setStyleSheet(self._provider_action_button_style())
+        self.provider_probe_button.clicked.connect(self._start_provider_probe)
+        studio_row.addWidget(self.provider_probe_button)
+        self.provider_probe_status = QtWidgets.QLabel("尚未检测")
+        self.provider_probe_status.setWordWrap(True)
+        self.provider_probe_status.setStyleSheet(
+            f"font-size: 12px; color: {'#aeb4ca' if colorMode == 'dark' else '#778096'};"
+        )
+        studio_row.addWidget(self.provider_probe_status, 1)
+        self.current_provider_layout.addLayout(studio_row)
+
+        self.provider_model_picker = ClickActivatedComboBox()
+        self.provider_model_picker.setPlaceholderText("检测成功后可从这里选择模型")
+        self.provider_model_picker.setEnabled(False)
+        self.provider_model_picker.activated.connect(self._apply_discovered_model)
+        self.current_provider_layout.addWidget(self.provider_model_picker)
+
         self.provider_detail_widget.updateGeometry()
         self.scroll_content.updateGeometry()
+
+    def _start_provider_probe(self):
+        """Run provider discovery away from the UI thread."""
+        provider = self.app.providers[self.selected_provider_index]
+        values = {setting.name: setting.get_value() for setting in provider.settings}
+        self.provider_probe_button.setEnabled(False)
+        self.provider_probe_button.setText("正在检测…")
+        self.provider_probe_status.setText("正在连接服务，请稍候。")
+        self.provider_model_picker.clear()
+        self.provider_model_picker.setEnabled(False)
+
+        def worker():
+            self.provider_probe_ready.emit(probe_provider(provider.provider_name, values))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_provider_probe(self, result):
+        if self.provider_probe_button is None:
+            return
+        self.provider_probe_button.setEnabled(True)
+        self.provider_probe_button.setText("重新检测")
+        if result.provider_name != self.app.providers[self.selected_provider_index].provider_name:
+            return
+
+        color = "#43b581" if result.ok else "#e46f7b"
+        detail = f"{result.message} · {result.latency_ms} ms"
+        self.provider_probe_status.setText(detail)
+        self.provider_probe_status.setStyleSheet(f"font-size: 12px; color: {color};")
+
+        normalized_base = result.normalized_values.get("api_base")
+        if normalized_base:
+            base_setting = next(
+                (setting for setting in self.app.providers[self.selected_provider_index].settings
+                 if setting.name == "api_base"),
+                None,
+            )
+            if isinstance(base_setting, TextSetting) and base_setting.input:
+                base_setting.input.setText(normalized_base)
+
+        self.provider_model_picker.clear()
+        if result.ok and result.models:
+            self.provider_model_picker.addItems(result.models)
+            model_index = self.provider_model_picker.findText(result.configured_model)
+            if model_index >= 0:
+                self.provider_model_picker.setCurrentIndex(model_index)
+            self.provider_model_picker.setEnabled(True)
+
+    def _apply_discovered_model(self, index):
+        model = self.provider_model_picker.itemText(index).strip()
+        if not model:
+            return
+        provider = self.app.providers[self.selected_provider_index]
+        model_setting = next(
+            (setting for setting in provider.settings if setting.name in ("model_name", "api_model")),
+            None,
+        )
+        if isinstance(model_setting, TextSetting) and model_setting.input:
+            model_setting.input.setText(model)
+        elif isinstance(model_setting, DropdownSetting) and model_setting.dropdown:
+            preset_index = model_setting.dropdown.findData(model)
+            if preset_index >= 0:
+                model_setting.dropdown.setCurrentIndex(preset_index)
+            elif model_setting.allow_custom:
+                custom_index = model_setting.dropdown.findData(model_setting._CUSTOM_SENTINEL)
+                model_setting.dropdown.setCurrentIndex(custom_index)
+                model_setting.custom_input.setText(model)
 
     def select_provider(self, index, ensure_visible=True):
         """Switch providers only after an explicit service-card click."""
@@ -275,6 +383,32 @@ class SettingsWindow(QtWidgets.QWidget):
                 self.app.config.get('remember_last_action', False)
             )
             general_layout.addWidget(self.remember_checkbox)
+
+            self.safe_apply_checkbox = QtWidgets.QCheckBox("应用前显示差异对比（推荐）")
+            self.safe_apply_checkbox.setChecked(
+                self.app.config.get('safe_apply_enabled', True)
+            )
+            self.safe_apply_checkbox.setToolTip("先预览增删内容，再决定应用、复制或恢复原文")
+            general_layout.addWidget(self.safe_apply_checkbox)
+
+            self.history_checkbox = QtWidgets.QCheckBox("保存本机加密历史与版本")
+            self.history_checkbox.setChecked(
+                self.app.config.get('history_enabled', True)
+            )
+            self.history_checkbox.setToolTip("正文使用 Windows 当前用户加密保护，默认最多保存 100 条")
+            general_layout.addWidget(self.history_checkbox)
+
+            tool_row = QHBoxLayout()
+            history_button = QtWidgets.QPushButton("历史与版本")
+            history_button.setStyleSheet(self._secondary_button_style())
+            history_button.clicked.connect(self.app.show_history)
+            tool_row.addWidget(history_button)
+            diagnostics_button = QtWidgets.QPushButton("兼容性诊断")
+            diagnostics_button.setStyleSheet(self._secondary_button_style())
+            diagnostics_button.clicked.connect(self.app.show_diagnostics)
+            tool_row.addWidget(diagnostics_button)
+            tool_row.addStretch()
+            general_layout.addLayout(tool_row)
 
             if AutostartManager.get_startup_path():
                 self.autostart_checkbox = QtWidgets.QCheckBox("开机启动")
@@ -576,11 +710,28 @@ class SettingsWindow(QtWidgets.QWidget):
                 self.app.config['theme'] = 'plain'
             self.app.config['custom_background_path'] = self.custom_background_input.text()
             self.app.config['remember_last_action'] = self.remember_checkbox.isChecked()
+            self.app.config['safe_apply_enabled'] = self.safe_apply_checkbox.isChecked()
+            self.app.config['history_enabled'] = self.history_checkbox.isChecked()
         else:
             self.app.create_tray_icon()
 
         self.app.config['streaming'] = False
         selected_provider = self.app.providers[self.selected_provider_index]
+
+        base_setting = next(
+            (setting for setting in selected_provider.settings if setting.name == "api_base"),
+            None,
+        )
+        if isinstance(base_setting, TextSetting) and base_setting.input:
+            try:
+                normalized_base = validate_base_url(
+                    selected_provider.provider_name, base_setting.input.text()
+                )
+            except ValueError as error:
+                QtWidgets.QMessageBox.warning(self, "API 地址不安全", str(error))
+                base_setting.input.setFocus()
+                return
+            base_setting.input.setText(normalized_base)
         self.app.config['provider'] = selected_provider.provider_name
 
         # Mark config as updated for v8 (new users start with this flag set)

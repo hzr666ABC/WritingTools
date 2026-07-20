@@ -1,11 +1,16 @@
-import os
-import subprocess
+import shutil
+# Only sys.executable is launched with a fixed PyInstaller argument list.
+import subprocess  # nosec B404
 import sys
+from pathlib import Path
 
 
 def run_pyinstaller_build():
+    source_dir = Path(__file__).resolve().parent
     pyinstaller_command = [
-        "pyinstaller",
+        sys.executable,
+        "-m",
+        "PyInstaller",
         "--onefile",
         "--windowed",
         "--icon=icons/app_icon.ico",
@@ -76,23 +81,29 @@ def run_pyinstaller_build():
     ]
 
     try:
-        # Remove previous build directories
-        if os.path.exists('dist'):
-            os.system("rmdir /s /q dist")
-        if os.path.exists('build'):
-            os.system("rmdir /s /q build")
-        if os.path.exists('__pycache__'):
-            os.system("rmdir /s /q __pycache__")
+        # Resolve every cleanup target under this script's directory. This
+        # avoids deleting an unrelated folder when launched from another cwd.
+        cleanup_targets = [source_dir / name for name in ("dist", "build", "__pycache__")]
+        for target in cleanup_targets:
+            resolved = target.resolve()
+            if resolved.parent != source_dir:
+                raise RuntimeError(f"Refusing unsafe cleanup target: {resolved}")
+            if resolved.exists():
+                shutil.rmtree(resolved)
 
         # Run PyInstaller
-        subprocess.run(pyinstaller_command, check=True)
+        subprocess.run(pyinstaller_command, check=True, cwd=source_dir)  # nosec B603
+        shutil.copy2(source_dir.parent / "LICENSE", source_dir / "dist" / "LICENSE")
+        shutil.copy2(
+            source_dir.parent / "THIRD_PARTY_NOTICES.md",
+            source_dir / "dist" / "THIRD_PARTY_NOTICES.md",
+        )
         print("Build completed successfully!")
 
         # Clean up unnecessary files
-        if os.path.exists('build'):
-            os.system("rmdir /s /q build")
-        if os.path.exists('__pycache__'):
-            os.system("rmdir /s /q __pycache__")
+        for target in (source_dir / "build", source_dir / "__pycache__"):
+            if target.exists():
+                shutil.rmtree(target)
 
         # No need to copy data files manually since they are included
         # in the executable using --add-data

@@ -21,7 +21,7 @@ source myvenv/bin/activate
 2. Once activated, install the required packages:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install --require-hashes -r requirements-lock.txt
 ```
 
 3. Build Writing Tools:
@@ -57,4 +57,7 @@ python pyinstaller-build-script.py
    - In Xcode, select "My Mac" as the run destination
    - Click the Play button or press ⌘R to build and run
 
-### [**◀️ Back to main page**](https://github.com/theJayTea/WritingTools)
+The build output includes `LICENSE` and `THIRD_PARTY_NOTICES.md`. Preserve both
+when distributing binaries.
+
+### [**◀️ Back to main page**](../README.md)
