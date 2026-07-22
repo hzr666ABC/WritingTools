@@ -21,6 +21,12 @@ import ui.SettingsWindow
 from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider
 from history_store import HistoryStore
 from pynput import keyboard as pykeyboard
+
+from hotkey_guard import (
+    hotkey_modifiers_are_physically_active,
+    modifier_is_physically_down,
+    send_modified_key,
+)
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
@@ -487,6 +493,11 @@ class WritingToolApp(QtWidgets.QApplication):
                 def on_global_activate():
                     if self.paused:
                         return
+                    if not hotkey_modifiers_are_physically_active(orig_shortcut):
+                        logging.warning(
+                            'Ignored a global hotkey activation with stale modifier state'
+                        )
+                        return
                     logging.debug('triggered global hotkey')
                     self.hotkey_triggered_signal.emit()
 
@@ -520,7 +531,9 @@ class WritingToolApp(QtWidgets.QApplication):
                             f'conflicts with an already-registered binding; skipping'
                         )
                         continue
-                    hotkey_map[parsed] = self._make_button_hotkey_callback(button_name)
+                    hotkey_map[parsed] = self._make_button_hotkey_callback(
+                        button_name, raw
+                    )
                     logging.debug(f'Registered button hotkey: {parsed} -> {button_name}')
 
             if not hotkey_map:
@@ -532,7 +545,7 @@ class WritingToolApp(QtWidgets.QApplication):
         except Exception as e:
             logging.error(f'Failed to register hotkey listener: {e}')
 
-    def _make_button_hotkey_callback(self, button_name):
+    def _make_button_hotkey_callback(self, button_name, hotkey=""):
         """
         Build a callback that fires `button_name` directly, bypassing the
         popup. Closes over `button_name` so we can register many distinct
@@ -544,6 +557,11 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         def callback():
             if self.paused:
+                return
+            if not hotkey_modifiers_are_physically_active(hotkey):
+                logging.warning(
+                    'Ignored a preset hotkey activation with stale modifier state'
+                )
                 return
             logging.debug(f'Direct hotkey fired for button "{button_name}"')
             # Match the global hotkey's behaviour: cancel any in-flight
@@ -709,11 +727,13 @@ class WritingToolApp(QtWidgets.QApplication):
 
         kbrd = pykeyboard.Controller()
         try:
-            kbrd.press(pykeyboard.Key.ctrl.value)
             copy_key = pykeyboard.KeyCode.from_vk(0x43) if os.name == 'nt' else 'c'
-            kbrd.press(copy_key)
-            kbrd.release(copy_key)
-            kbrd.release(pykeyboard.Key.ctrl.value)
+            send_modified_key(
+                kbrd,
+                pykeyboard.Key.ctrl.value,
+                copy_key,
+                modifier_already_down=modifier_is_physically_down('ctrl'),
+            )
         except Exception as e:
             logging.error(f'Error simulating Ctrl+C: {e}')
 
@@ -985,10 +1005,12 @@ class WritingToolApp(QtWidgets.QApplication):
         try:
             kbrd = pykeyboard.Controller()
             paste_key = pykeyboard.KeyCode.from_vk(0x56) if os.name == 'nt' else 'v'
-            kbrd.press(pykeyboard.Key.ctrl.value)
-            kbrd.press(paste_key)
-            kbrd.release(paste_key)
-            kbrd.release(pykeyboard.Key.ctrl.value)
+            send_modified_key(
+                kbrd,
+                pykeyboard.Key.ctrl.value,
+                paste_key,
+                modifier_already_down=modifier_is_physically_down('ctrl'),
+            )
             time.sleep(0.22)
             pyperclip.copy(clipboard_backup)
             return True
