@@ -1,6 +1,11 @@
 import unittest
 
-from quick_action_workflow import bottom_right_position, number_key_to_index, resolve_remembered_option
+from quick_action_workflow import (
+    bottom_right_position,
+    number_key_to_index,
+    record_trigger,
+    resolve_remembered_option,
+)
 
 
 class FakeGeometry:
@@ -38,6 +43,20 @@ class WorkflowTests(unittest.TestCase):
 
     def test_popup_sits_inside_bottom_right_work_area(self):
         self.assertEqual(bottom_right_position(FakeGeometry(), 390, 553), (1510, 467))
+
+    def test_rapid_trigger_is_throttled_without_requesting_app_exit(self):
+        recent = []
+        for timestamp in (10.0, 10.2):
+            recent, throttled = record_trigger(recent, timestamp)
+            self.assertFalse(throttled)
+
+        recent, throttled = record_trigger(recent, 10.4)
+        self.assertTrue(throttled)
+        self.assertEqual(recent, [10.0, 10.2, 10.4])
+
+        recent, throttled = record_trigger(recent, 12.0)
+        self.assertFalse(throttled)
+        self.assertEqual(recent, [12.0])
 
 
 if __name__ == "__main__":

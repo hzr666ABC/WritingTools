@@ -75,7 +75,7 @@ class AboutWindow(QtWidgets.QWidget):
                 'Mac 用户可以查看 <a href="https://github.com/theJayTea/WritingTools#-macos">Writing Tools macOS 版本</a>（作者：<a href="https://github.com/Aryamirsepasi">Arya Mirsepasi</a>）。<br>' + \
                 """</p>
                 <p style='text-align: center;'>
-                <b>版本：</b> 中文增强版 cn-v1.1.0（基于 Windows v9）
+                <b>版本：</b> 中文增强版 cn-v1.1.1（基于 Windows v9）
                 </p>
                 <p />
                 """

@@ -239,9 +239,6 @@ class ChatContentScrollArea(QScrollArea):
         self.layout.addWidget(msg_container)
         self.layout.addStretch()
         
-        if hasattr(self.parent(), 'current_text_display'):
-            self.parent().current_text_display = text_display
-            
         QtCore.QTimer.singleShot(50, self.post_message_updates)
         
         return text_display
@@ -312,6 +309,7 @@ class ResponseWindow(QtWidgets.QWidget):
         self.loading_container = None
         self.chat_area = None
         self.chat_history = []
+        self._closed = False
 
         # Setup thinking animation with full range of dots
         self.thinking_timer = QtCore.QTimer(self)
@@ -631,15 +629,19 @@ class ResponseWindow(QtWidgets.QWidget):
         text_display = self.chat_area.add_message(text)
         
         # Update zoom state
-        if hasattr(self.app.config, 'response_window_zoom'):
+        if isinstance(self.app.config, dict) and 'response_window_zoom' in self.app.config:
             text_display.zoom_factor = self.app.config['response_window_zoom']
             text_display._apply_zoom()
+        self.current_text_display = text_display
         
         QtCore.QTimer.singleShot(100, self._adjust_window_height)
         
-    @Slot(str)
-    def handle_followup_response(self, response_text):
+    @Slot(object)
+    def handle_followup_response(self, context):
         """Handle the follow-up response from the AI with improved layout handling"""
+        if self._closed or context.get("window") is not self:
+            return
+        response_text = context.get("response", "")
         if response_text:
             self.loading_label.setVisible(False)
             text_display = self.chat_area.add_message(response_text)
@@ -648,6 +650,7 @@ class ResponseWindow(QtWidgets.QWidget):
             if hasattr(self, 'current_text_display'):
                 text_display.zoom_factor = self.current_text_display.zoom_factor
                 text_display._apply_zoom()
+            self.current_text_display = text_display
             
             if len(self.chat_history) > 0 and self.chat_history[-1]["role"] != "assistant":
                 self.chat_history.append({
@@ -675,6 +678,7 @@ class ResponseWindow(QtWidgets.QWidget):
         if hasattr(self, 'current_text_display'):
             text_display.zoom_factor = self.current_text_display.zoom_factor
             text_display._apply_zoom()
+        self.current_text_display = text_display
         
         self.chat_history.append({"role": "user", "content": message})
         self.start_thinking_animation()
@@ -693,6 +697,7 @@ class ResponseWindow(QtWidgets.QWidget):
         
     def closeEvent(self, event):
         """Handle window close event"""
+        self._closed = True
         # Save zoom factor to main config
         if hasattr(self, 'current_text_display'):
             self.app.config['response_window_zoom'] = self.current_text_display.zoom_factor
@@ -700,8 +705,8 @@ class ResponseWindow(QtWidgets.QWidget):
 
         self.chat_history = []
         
-        if hasattr(self.app, 'current_response_window'):
-            delattr(self.app, 'current_response_window')
+        if getattr(self.app, 'current_response_window', None) is self:
+            self.app.current_response_window = None
         
 
         super().closeEvent(event)

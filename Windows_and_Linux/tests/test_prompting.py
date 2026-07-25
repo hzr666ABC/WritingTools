@@ -48,6 +48,27 @@ class PromptingTests(unittest.TestCase):
         self.assertEqual(option_display_name("My Preset", normalized["My Preset"]), "My Preset")
         self.assertTrue(normalized["My Preset"]["uses_base_instruction"])
 
+    def test_normalization_rejects_invalid_root_and_entries(self):
+        self.assertEqual(normalize_options(["not", "an", "object"]), {})
+        normalized = normalize_options(
+            {
+                "": {"instruction": "empty key"},
+                "Broken": "not an object",
+                "Valid": {
+                    "prefix": 123,
+                    "instruction": None,
+                    "open_in_window": "false",
+                    "label": " ",
+                },
+            }
+        )
+
+        self.assertEqual(list(normalized), ["Valid"])
+        self.assertEqual(normalized["Valid"]["prefix"], "123")
+        self.assertEqual(normalized["Valid"]["instruction"], "")
+        self.assertFalse(normalized["Valid"]["open_in_window"])
+        self.assertEqual(normalized["Valid"]["label"], "Valid")
+
 
 if __name__ == "__main__":
     unittest.main()

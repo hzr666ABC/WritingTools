@@ -31,3 +31,25 @@ def number_key_to_index(key_number: int, option_count: int) -> int | None:
     if 0 <= index < option_count:
         return index
     return None
+
+
+def record_trigger(
+    recent_triggers: list[float],
+    current_time: float,
+    *,
+    window_seconds: float = 1.5,
+    maximum_triggers: int = 3,
+) -> tuple[list[float], bool]:
+    """Record a trigger and report whether it should be throttled.
+
+    The triggering application must remain running when throttled.  This only
+    suppresses keyboard repeat or accidental rapid re-entry.
+    """
+
+    active = [
+        timestamp
+        for timestamp in recent_triggers
+        if current_time - timestamp <= window_seconds
+    ]
+    active.append(current_time)
+    return active, len(active) >= maximum_triggers

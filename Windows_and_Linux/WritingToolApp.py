@@ -32,7 +32,12 @@ from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from prompting import compose_system_instruction, normalize_options, option_display_name
-from quick_action_workflow import bottom_right_position, resolve_remembered_option
+from quick_action_workflow import (
+    bottom_right_position,
+    record_trigger,
+    resolve_remembered_option,
+)
+from request_guard import RequestGenerationGuard
 from secure_storage import protect_secret, redact_text, unprotect_secret
 from text_application import activate_window, capture_foreground_window
 from ui.i18n import translate
@@ -47,28 +52,30 @@ class _SelectedTextHolder:
     `process_option_thread`. The capture thread sets `text` and signals
     `ready` once done.
     """
-    __slots__ = ("text", "ready")
+    __slots__ = ("text", "ready", "request_id", "source_window_handle")
 
     def __init__(self):
         self.text = ""
         self.ready = threading.Event()
+        self.request_id = 0
+        self.source_window_handle = None
 
 
 class WritingToolApp(QtWidgets.QApplication):
     """
     The main application class for Writing Tools.
     """
-    output_ready_signal = Signal(str)
+    generation_result_signal = Signal(object)
     show_message_signal = Signal(str, str)  # a signal for showing message boxes
     hotkey_triggered_signal = Signal()
-    followup_response_signal = Signal(str)
+    followup_response_signal = Signal(object)
 
 
     def __init__(self, argv):
         super().__init__(argv)
         self.current_response_window = None
         logging.debug('Initializing WritingToolApp')
-        self.output_ready_signal.connect(self.replace_text)
+        self.generation_result_signal.connect(self._handle_generation_result)
         self.show_message_signal.connect(self.show_message_box)
         self.hotkey_triggered_signal.connect(self.on_hotkey_pressed)
         self.config = None
@@ -112,6 +119,11 @@ class WritingToolApp(QtWidgets.QApplication):
         # over the clipboard at once.
         self.current_text_holder = None
         self._capture_lock = threading.Lock()
+        self._request_guard = RequestGenerationGuard()
+        self._trigger_lock = threading.Lock()
+        self.recent_triggers = []
+        self.TRIGGER_WINDOW = 1.5
+        self.MAX_TRIGGERS = 3
 
         self._ = gettext.gettext
         self.setup_translations('zh_CN')
@@ -151,10 +163,6 @@ class WritingToolApp(QtWidgets.QApplication):
             # Initialize update checker
             self.update_checker = UpdateChecker(self)
             self.update_checker.check_updates_async()
-
-        self.recent_triggers = []  # Track recent hotkey triggers
-        self.TRIGGER_WINDOW = 1.5  # Time window in seconds
-        self.MAX_TRIGGERS = 3  # Max allowed triggers in window
 
     def setup_translations(self, lang=None):
         if not lang:
@@ -196,20 +204,18 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def check_trigger_spam(self):
         """
-        Check if hotkey is being triggered too frequently (3+ times in 1.5 seconds).
-        Returns True if spam is detected.
+        Check if the hotkey is being triggered too frequently.
+
+        Rapid keyboard repeat is ignored; it must never terminate the app.
         """
-        current_time = time.time()
-        
-        # Add current trigger
-        self.recent_triggers.append(current_time)
-        
-        # Remove old triggers outside the window
-        self.recent_triggers = [t for t in self.recent_triggers 
-                            if current_time - t <= self.TRIGGER_WINDOW]
-        
-        # Check if we have too many triggers in the window
-        return len(self.recent_triggers) >= self.MAX_TRIGGERS
+        with self._trigger_lock:
+            self.recent_triggers, throttled = record_trigger(
+                self.recent_triggers,
+                time.monotonic(),
+                window_seconds=self.TRIGGER_WINDOW,
+                maximum_triggers=self.MAX_TRIGGERS,
+            )
+            return throttled
 
     def load_config(self):
         """
@@ -218,9 +224,18 @@ class WritingToolApp(QtWidgets.QApplication):
         self.config_path = os.path.join(os.path.dirname(sys.argv[0]), 'config.json')
         logging.debug(f'Loading config from {self.config_path}')
         if os.path.exists(self.config_path):
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                self.config = json.load(f)
+            try:
+                if os.path.getsize(self.config_path) > 2_000_000:
+                    raise ValueError('config.json exceeds the 2 MB safety limit')
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                if not isinstance(loaded, dict):
+                    raise ValueError('config.json must contain a JSON object')
+                self.config = loaded
                 logging.debug('Config loaded successfully')
+            except (OSError, UnicodeError, ValueError) as error:
+                logging.error(f'Unable to load config.json safely: {error}')
+                self.config = None
         else:
             logging.debug('Config file not found')
             self.config = None
@@ -397,9 +412,19 @@ class WritingToolApp(QtWidgets.QApplication):
         self.options_path = os.path.join(os.path.dirname(sys.argv[0]), 'options.json')
         logging.debug(f'Loading options from {self.options_path}')
         if os.path.exists(self.options_path):
-            with open(self.options_path, 'r', encoding='utf-8') as f:
-                self.options = normalize_options(json.load(f))
+            try:
+                if os.path.getsize(self.options_path) > 2_000_000:
+                    raise ValueError('options.json exceeds the 2 MB safety limit')
+                with open(self.options_path, 'r', encoding='utf-8') as f:
+                    self.options = normalize_options(json.load(f))
                 logging.debug('Options loaded successfully')
+            except (OSError, UnicodeError, ValueError) as error:
+                logging.error(f'Unable to load options.json safely: {error}')
+                self.options = {}
+                self.show_message_signal.emit(
+                    '预设文件错误',
+                    'options.json 无法读取或格式无效。程序将继续运行，请在预设管理中恢复或导入预设。',
+                )
         else:
             logging.debug('Options file not found')
             self.options = {}
@@ -563,6 +588,9 @@ class WritingToolApp(QtWidgets.QApplication):
                     'Ignored a preset hotkey activation with stale modifier state'
                 )
                 return
+            if self.check_trigger_spam():
+                logging.warning('Ignored rapid repeated preset hotkey activation')
+                return
             logging.debug(f'Direct hotkey fired for button "{button_name}"')
             # Match the global hotkey's behaviour: cancel any in-flight
             # request so a new fire doesn't pile up on top of a previous one.
@@ -601,9 +629,9 @@ class WritingToolApp(QtWidgets.QApplication):
             logging.warning(f'Button "{button_name}" no longer exists; ignoring hotkey')
             return
 
-        self.source_window_handle = capture_foreground_window()
-        self.current_text_holder = _SelectedTextHolder()
-        self._fire_ctrl_c_and_capture_async(self.current_text_holder)
+        holder = self._begin_selection_capture()
+        if holder is None:
+            return
 
         # Same worker path as a popup-button click. process_option_thread
         # waits on the holder, surfaces "Please select text…" if empty,
@@ -626,8 +654,7 @@ class WritingToolApp(QtWidgets.QApplication):
         
         # Check for spam triggers
         if self.check_trigger_spam():
-            logging.warning('Hotkey spam detected - quitting application')
-            self.exit_app()
+            logging.warning('Ignored rapid repeated hotkey activation')
             return
             
         # Original hotkey handling continues...
@@ -661,9 +688,9 @@ class WritingToolApp(QtWidgets.QApplication):
         # Fresh holder per popup. Fire Ctrl+C *before* we create the popup
         # so the keystroke is queued while focus is still on the user's
         # source app — the actual clipboard read happens in the background.
-        self.source_window_handle = capture_foreground_window()
-        self.current_text_holder = _SelectedTextHolder()
-        self._fire_ctrl_c_and_capture_async(self.current_text_holder)
+        holder = self._begin_selection_capture()
+        if holder is None:
+            return
 
         try:
             if self.popup_window is not None:
@@ -705,6 +732,20 @@ class WritingToolApp(QtWidgets.QApplication):
         except Exception as e:
             logging.error(f'Error showing popup window: {e}', exc_info=True)
 
+    def _begin_selection_capture(self):
+        """Start one isolated text capture and make it the active request."""
+
+        source_window_handle = capture_foreground_window()
+        holder = _SelectedTextHolder()
+        if not self._fire_ctrl_c_and_capture_async(holder):
+            return None
+
+        holder.request_id = self._request_guard.begin()
+        holder.source_window_handle = source_window_handle
+        self.source_window_handle = source_window_handle
+        self.current_text_holder = holder
+        return holder
+
     def _fire_ctrl_c_and_capture_async(self, holder):
         """
         Inject Ctrl+C now (must happen while focus is still on the user's
@@ -718,15 +759,21 @@ class WritingToolApp(QtWidgets.QApplication):
         pressed the hotkey without actually selecting anything, which
         `process_option_thread` reports as a normal error.
         """
-        try:
-            clipboard_backup = pyperclip.paste()
-        except Exception:
-            clipboard_backup = ''
+        if not self._capture_lock.acquire(blocking=False):
+            logging.warning('Ignored text capture while another clipboard capture is active')
+            return False
 
-        self.clear_clipboard()
-
-        kbrd = pykeyboard.Controller()
+        clipboard_backup = ''
         try:
+            try:
+                clipboard_backup = pyperclip.paste()
+            except Exception:
+                clipboard_backup = ''
+
+            if not self.clear_clipboard():
+                raise RuntimeError('Unable to clear clipboard before text capture')
+
+            kbrd = pykeyboard.Controller()
             copy_key = pykeyboard.KeyCode.from_vk(0x43) if os.name == 'nt' else 'c'
             send_modified_key(
                 kbrd,
@@ -736,33 +783,49 @@ class WritingToolApp(QtWidgets.QApplication):
             )
         except Exception as e:
             logging.error(f'Error simulating Ctrl+C: {e}')
+            try:
+                pyperclip.copy(clipboard_backup)
+            except Exception as restore_error:
+                logging.error(f'Error restoring clipboard after capture failure: {restore_error}')
+            holder.ready.set()
+            self._capture_lock.release()
+            return False
 
         def _poll_clipboard():
-            # Lock so concurrent hotkey presses don't trample each other's
-            # in-flight captures.
-            with self._capture_lock:
-                text = ''
-                try:
-                    deadline = time.time() + 2.0
-                    while time.time() < deadline:
-                        try:
-                            text = pyperclip.paste() or ''
-                        except Exception as e:
-                            logging.error(f'Error reading clipboard during poll: {e}')
-                            text = ''
-                        if text:
-                            break
-                        time.sleep(0.05)
-                    holder.text = text
-                    logging.debug(f'Captured selected text (len={len(text)})')
-                finally:
+            text = ''
+            try:
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
                     try:
-                        pyperclip.copy(clipboard_backup)
+                        text = pyperclip.paste() or ''
                     except Exception as e:
-                        logging.error(f'Error restoring clipboard: {e}')
-                    holder.ready.set()
+                        logging.error(f'Error reading clipboard during poll: {e}')
+                        text = ''
+                    if text:
+                        break
+                    time.sleep(0.05)
+                holder.text = text
+                logging.debug(f'Captured selected text (len={len(text)})')
+            finally:
+                try:
+                    pyperclip.copy(clipboard_backup)
+                except Exception as e:
+                    logging.error(f'Error restoring clipboard: {e}')
+                holder.ready.set()
+                self._capture_lock.release()
 
-        threading.Thread(target=_poll_clipboard, daemon=True).start()
+        try:
+            threading.Thread(target=_poll_clipboard, daemon=True).start()
+            return True
+        except Exception as error:
+            logging.error(f'Unable to start clipboard capture worker: {error}')
+            try:
+                pyperclip.copy(clipboard_backup)
+            except Exception as restore_error:
+                logging.error(f'Error restoring clipboard after worker failure: {restore_error}')
+            holder.ready.set()
+            self._capture_lock.release()
+            return False
 
     @staticmethod
     def clear_clipboard():
@@ -771,8 +834,10 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         try:
             pyperclip.copy('')
+            return True
         except Exception as e:
             logging.error(f'Error clearing clipboard: {e}')
+            return False
 
     def process_option(self, option, custom_change=None):
         """
@@ -783,18 +848,23 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         logging.debug(f'Processing option: {option}')
 
+        holder = self.current_text_holder
+        if holder is None or not holder.request_id:
+            logging.warning('No active text capture is available for this option')
+            self.show_message_signal.emit('错误', '当前选区已经失效，请重新选择文字后再试。')
+            return
+
         if option != 'Custom' and option in self.options:
             self.set_last_used_option(option)
 
         # Drop any stale ref so a previous run's late-arriving response can't
         # land in a now-irrelevant window. The new window (if any) is created
         # by the worker via `_setup_response_window` once the text is in.
-        if hasattr(self, 'current_response_window'):
-            delattr(self, 'current_response_window')
+        self.current_response_window = None
 
         threading.Thread(
             target=self.process_option_thread,
-            args=(option, custom_change),
+            args=(option, custom_change, holder),
             daemon=True
         ).start()
 
@@ -814,15 +884,18 @@ class WritingToolApp(QtWidgets.QApplication):
         self.config['remember_last_action'] = bool(enabled)
         self.save_config(self.config)
 
-    @Slot(str, str)
-    def _setup_response_window(self, option, selected_text):
+    @Slot(str, str, int)
+    def _setup_response_window(self, option, selected_text, request_id):
         """
         Open the response window and seed its chat history. Called from
         `process_option_thread` via `BlockingQueuedConnection` so the
         worker can rely on the window existing before it dispatches the
         AI request.
         """
+        if not self._request_guard.is_current(request_id):
+            return
         self.current_response_window = self.show_response_window(option, selected_text)
+        self.current_response_window.request_id = request_id
         self.current_response_window.chat_history = [
             {
                 "role": "user",
@@ -830,7 +903,7 @@ class WritingToolApp(QtWidgets.QApplication):
             }
         ]
 
-    def process_option_thread(self, option, custom_change=None):
+    def process_option_thread(self, option, custom_change=None, holder=None):
         """
         Worker: wait for the background clipboard capture to land, then
         either open a response window (for window-mode options) or set up
@@ -842,10 +915,14 @@ class WritingToolApp(QtWidgets.QApplication):
         # and click. The 3s ceiling is a safety net for genuinely sluggish
         # systems; if the 2s polling deadline in the capture thread tripped
         # first, the event is already set and this returns immediately.
-        holder = self.current_text_holder
         if holder is None or not holder.ready.wait(timeout=3.0):
             logging.warning('Timed out waiting for selected text capture')
         selected_text = (holder.text if holder else '') or ''
+
+        request_id = holder.request_id if holder else 0
+        if not self._request_guard.is_current(request_id):
+            logging.info(f'Discarded stale request before dispatch: {request_id}')
+            return
 
         if not selected_text.strip():
             # The chat-mode fallback that used to fire here was removed when
@@ -855,20 +932,26 @@ class WritingToolApp(QtWidgets.QApplication):
             self.show_message_signal.emit('错误', '请先选择要处理的文字。')
             return
 
-        self.pending_option = option
-        self.pending_original = selected_text
+        selected_prompt = self.options.get(option)
+        if not isinstance(selected_prompt, dict):
+            self.show_message_signal.emit('错误', '所选预设已不存在，请重新打开操作面板。')
+            return
 
-        if self.options[option]['open_in_window']:
+        open_in_window = bool(selected_prompt.get('open_in_window', False))
+
+        if open_in_window:
             QtCore.QMetaObject.invokeMethod(
                 self,
                 '_setup_response_window',
                 QtCore.Qt.ConnectionType.BlockingQueuedConnection,
                 QtCore.Q_ARG(str, option),
-                QtCore.Q_ARG(str, selected_text)
+                QtCore.Q_ARG(str, selected_text),
+                QtCore.Q_ARG(int, request_id),
             )
+            if not self._request_guard.is_current(request_id):
+                return
 
         try:
-            selected_prompt = self.options.get(option, {})
             prompt_prefix = selected_prompt.get('prefix', '')
             system_instruction = compose_system_instruction(selected_prompt)
             if option == 'Custom':
@@ -879,43 +962,89 @@ class WritingToolApp(QtWidgets.QApplication):
             self.output_queue = ""
 
             logging.debug(f'Getting response from provider for option: {option}')
+            provider = self.current_provider
+            if provider is None:
+                raise RuntimeError('No AI provider is active')
 
-            if self.options[option]['open_in_window']:
+            if open_in_window:
                 logging.debug('Getting response for window display')
-                response = self.current_provider.get_response(system_instruction, prompt, return_response=True)
-                logging.debug(f'Got response of length: {len(response) if response else 0}')
-
-                if hasattr(self, 'current_response_window'):
-                    if response and self.config.get('history_enabled', True):
-                        self.history_store.add_entry(
-                            option=option,
-                            original=selected_text,
-                            result=response,
-                            provider=self.current_provider.provider_name,
-                            model=self._current_model_name(),
-                            status='viewed',
-                        )
-                    # noinspection PyTypeChecker
-                    QtCore.QMetaObject.invokeMethod(
-                        self.current_response_window,
-                        'set_text',
-                        QtCore.Qt.ConnectionType.QueuedConnection,
-                        QtCore.Q_ARG(str, response)
-                    )
-                    logging.debug('Invoked set_text on response window')
             else:
                 logging.debug('Getting response for direct replacement')
-                self.current_provider.get_response(system_instruction, prompt)
-                logging.debug('Response processed')
+            response = provider.get_response(
+                system_instruction,
+                prompt,
+                return_response=True,
+            )
+            logging.debug(f'Got response of length: {len(response) if response else 0}')
+            if response:
+                self.generation_result_signal.emit(
+                    {
+                        'request_id': request_id,
+                        'option': option,
+                        'original': selected_text,
+                        'result': response,
+                        'source_window_handle': holder.source_window_handle,
+                        'open_in_window': open_in_window,
+                        'provider': provider.provider_name,
+                        'model': str(
+                            getattr(provider, 'model_name', '')
+                            or getattr(provider, 'api_model', '')
+                            or ''
+                        ).strip(),
+                    }
+                )
 
         except Exception as e:
             safe_error = self._safe_error_text(e)
             logging.error(f'An error occurred: {safe_error}')
 
+            if not self._request_guard.is_current(request_id):
+                logging.info(f'Discarded error from stale request: {request_id}')
+                return
             if "Resource has been exhausted" in str(e):
                 self.show_message_signal.emit('请求频率受限', 'Gemini API 已达到每分钟请求上限，请稍后再试。若经常发生，请在设置中切换到配额更高的模型。')
+            elif "exceeded" in str(e).lower() or "rate limit" in str(e).lower():
+                self.show_message_signal.emit('请求频率受限', 'API 已达到频率或用量限制，请稍后再试或调整设置。')
             else:
                 self.show_message_signal.emit('错误', f'处理时发生错误：{safe_error}')
+
+    @Slot(object)
+    def _handle_generation_result(self, context):
+        """Apply only the newest request result to its original selection."""
+
+        request_id = int(context.get('request_id', 0))
+        if not self._request_guard.is_current(request_id):
+            logging.info(f'Discarded stale AI response: {request_id}')
+            return
+
+        result = context.get('result', '')
+        if not isinstance(result, str) or not result:
+            return
+
+        if context.get('open_in_window'):
+            window = self.current_response_window
+            if window is None or getattr(window, 'request_id', 0) != request_id:
+                logging.info(f'Discarded response for a closed result window: {request_id}')
+                return
+            if self.config.get('history_enabled', True):
+                try:
+                    self.history_store.add_entry(
+                        option=context.get('option', '写作'),
+                        original=context.get('original', ''),
+                        result=result,
+                        provider=context.get('provider', ''),
+                        model=context.get('model', ''),
+                        status='viewed',
+                    )
+                except Exception as error:
+                    logging.error(f'Unable to save viewed result to history: {error}')
+            window.set_text(result)
+            return
+
+        self.source_window_handle = context.get('source_window_handle')
+        self.pending_option = context.get('option', '')
+        self.pending_original = context.get('original', '')
+        self.replace_text(result)
 
     @Slot(str, str)
     def show_message_box(self, title, message):
@@ -930,6 +1059,7 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         display_name = option_display_name(option, self.options.get(option, {}))
         response_window = ui.ResponseWindow.ResponseWindow(self, f"{display_name}结果")
+        response_window.option = display_name
         response_window.selected_text = text  # Store the text for regeneration
         response_window.show()
         return response_window
@@ -948,23 +1078,25 @@ class WritingToolApp(QtWidgets.QApplication):
         original = self.pending_original or (
             self.current_text_holder.text if self.current_text_holder else ''
         )
+        entry = {
+            'id': '',
+            'option': self.pending_option or '写作',
+            'original': original,
+            'result': cleaned_text,
+            'version': 1,
+        }
         if self.config.get('history_enabled', True):
-            entry = self.history_store.add_entry(
-                option=self.pending_option or '写作',
-                original=original,
-                result=cleaned_text,
-                provider=self.current_provider.provider_name,
-                model=self._current_model_name(),
-                status='preview' if self.config.get('safe_apply_enabled', True) else 'applied',
-            )
-        else:
-            entry = {
-                'id': '',
-                'option': self.pending_option or '写作',
-                'original': original,
-                'result': cleaned_text,
-                'version': 1,
-            }
+            try:
+                entry = self.history_store.add_entry(
+                    option=self.pending_option or '写作',
+                    original=original,
+                    result=cleaned_text,
+                    provider=self.current_provider.provider_name,
+                    model=self._current_model_name(),
+                    status='preview' if self.config.get('safe_apply_enabled', True) else 'applied',
+                )
+            except Exception as error:
+                logging.error(f'Unable to save generated result to history: {error}')
 
         if self.config.get('safe_apply_enabled', True):
             if self.safe_apply_window is not None:
@@ -995,12 +1127,21 @@ class WritingToolApp(QtWidgets.QApplication):
             clipboard_backup = pyperclip.paste()
         except Exception:
             clipboard_backup = ''
-        pyperclip.copy(text)
+        try:
+            pyperclip.copy(text)
+        except Exception as error:
+            logging.error(f'Unable to place generated text on the clipboard: {error}')
+            return False
         if not self.source_window_handle:
             logging.warning('No source window handle is available; left result on clipboard')
             return False
 
-        if not activate_window(self.source_window_handle):
+        try:
+            activated = activate_window(self.source_window_handle)
+        except Exception as error:
+            logging.error(f'Unable to reactivate the source window: {error}')
+            activated = False
+        if not activated:
             logging.warning('Unable to reactivate the source window; left result on clipboard')
             return False
         try:
@@ -1013,12 +1154,25 @@ class WritingToolApp(QtWidgets.QApplication):
                 modifier_already_down=modifier_is_physically_down('ctrl'),
             )
             time.sleep(0.12)
-            pyperclip.copy(clipboard_backup)
-            return True
         except Exception as error:
             logging.error(f'Unable to apply text to source window: {error}')
-            pyperclip.copy(text)
+            try:
+                pyperclip.copy(text)
+            except Exception as clipboard_error:
+                logging.error(f'Unable to retain generated text on clipboard: {clipboard_error}')
             return False
+        try:
+            pyperclip.copy(clipboard_backup)
+        except Exception as error:
+            # The paste already succeeded. Keep the generated text available
+            # when clipboard restoration fails, but do not report the apply as
+            # failed or offer a misleading retry that would paste twice.
+            logging.error(f'Unable to restore clipboard after successful paste: {error}')
+            try:
+                pyperclip.copy(text)
+            except Exception as clipboard_error:
+                logging.error(f'Unable to retain generated text on clipboard: {clipboard_error}')
+        return True
 
     @Slot()
     def show_history(self):
@@ -1170,42 +1324,45 @@ class WritingToolApp(QtWidgets.QApplication):
         Process a follow-up question in the chat window.
         """
         logging.debug(f'Processing follow-up question: {question}')
-        
+
+        if not response_window.chat_history:
+            logging.error("No chat history found")
+            self.show_message_signal.emit('错误', '未找到对话记录。')
+            self.followup_response_signal.emit(
+                {'window': response_window, 'response': ''}
+            )
+            return
+
+        # ResponseWindow already appended the current question. Snapshot the
+        # history once on the GUI thread so the worker neither duplicates the
+        # question nor reads a mutable QWidget-owned list in the background.
+        history = [dict(message) for message in response_window.chat_history]
+        provider = self.current_provider
+
         def process_thread():
             logging.debug('Starting follow-up processing thread')
             try:
-                if not response_window.chat_history:
-                    logging.error("No chat history found")
-                    self.show_message_signal.emit('错误', '未找到对话记录。')
-                    return
-
-                # Add current question to chat history
-                response_window.chat_history.append({
-                    "role": "user",
-                    "content": question
-                })
-                
-                # Get chat history
-                history = response_window.chat_history.copy()
-                
                 # System instruction based on original option
-                system_instruction = "You are a helpful AI assistant. Provide clear and direct responses, maintaining the same format and style as your previous responses. If appropriate, use Markdown formatting to make your response more readable."
-                
+                system_instruction = "你是一名清晰、直接的 AI 助手。延续此前回答的语言、格式和风格；必要时使用简洁的 Markdown。"
+
                 logging.debug('Sending request to AI provider')
-                
+
+                if provider is None:
+                    raise RuntimeError('No AI provider is active')
+
                 # Format conversation differently based on provider
-                if isinstance(self.current_provider, GeminiProvider):
+                if isinstance(provider, GeminiProvider):
                     # Gemini takes the system instruction via its config object,
                     # not as an in-history message. We pass the raw chat history
                     # (user/assistant turns); GeminiProvider handles role mapping
                     # and drops any "system" entries internally.
-                    response_text = self.current_provider.get_response(
+                    response_text = provider.get_response(
                         system_instruction,
                         history,
                         return_response=True
                     )
 
-                elif isinstance(self.current_provider, OllamaProvider):  #
+                elif isinstance(provider, OllamaProvider):  #
                     # For Ollama, prepare messages with system instruction and history
                     messages = [{"role": "system", "content": system_instruction}]
 
@@ -1216,7 +1373,7 @@ class WritingToolApp(QtWidgets.QApplication):
                         })
 
                     # Get response from Ollama
-                    response_text = self.current_provider.get_response(
+                    response_text = provider.get_response(
                         system_instruction,
                         messages,
                         return_response=True
@@ -1233,33 +1390,31 @@ class WritingToolApp(QtWidgets.QApplication):
                         messages.append({"role": role, "content": msg["content"]})
                     
                     # Get response by passing the full messages array
-                    response_text = self.current_provider.get_response(
+                    response_text = provider.get_response(
                         system_instruction,
                         messages,  # Pass messages array directly
                         return_response=True
                     )
 
-                logging.debug(f'Got response of length: {len(response_text)}')
-                
-                # Add response to chat history
-                response_window.chat_history.append({
-                    "role": "assistant",
-                    "content": response_text
-                })
-                
-                # Emit response via signal
-                self.followup_response_signal.emit(response_text)
+                logging.debug(f'Got response of length: {len(response_text or "")}')
+                self.followup_response_signal.emit(
+                    {'window': response_window, 'response': response_text or ''}
+                )
 
             except Exception as e:
                 safe_error = self._safe_error_text(e)
                 logging.error(f'Error processing follow-up question: {safe_error}')
 
-                if "Resource has been exhausted" in str(e):
-                    self.show_message_signal.emit('请求频率受限', 'Gemini API 已达到每分钟请求上限，请稍后再试。')
-                    self.followup_response_signal.emit("抱歉，处理追问时发生错误。")
-                else:
-                    self.show_message_signal.emit('错误', f'处理时发生错误：{safe_error}')
-                    self.followup_response_signal.emit("抱歉，处理追问时发生错误。")
+                if not getattr(response_window, '_closed', False):
+                    if "Resource has been exhausted" in str(e):
+                        self.show_message_signal.emit('请求频率受限', 'Gemini API 已达到每分钟请求上限，请稍后再试。')
+                    elif "exceeded" in str(e).lower() or "rate limit" in str(e).lower():
+                        self.show_message_signal.emit('请求频率受限', 'API 已达到频率或用量限制，请稍后再试或调整设置。')
+                    else:
+                        self.show_message_signal.emit('错误', f'处理时发生错误：{safe_error}')
+                self.followup_response_signal.emit(
+                    {'window': response_window, 'response': '抱歉，处理追问时发生错误。'}
+                )
 
         # Start the thread
         threading.Thread(target=process_thread, daemon=True).start()
