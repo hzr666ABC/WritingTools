@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from text_application import build_diff_html
@@ -138,7 +140,14 @@ class SafeApplyWindow(QtWidgets.QWidget):
         if success:
             self.previous_text = prior
             self.current_text = text
-            self.app.history_store.update_status(self.entry["id"], status)
+            if self.entry.get("id"):
+                try:
+                    self.app.history_store.update_status(self.entry["id"], status)
+                except Exception as error:
+                    # Applying text is the primary action. A locked/unavailable
+                    # history file must not turn a successful paste into a
+                    # failed operation.
+                    logging.error(f"Unable to update history status: {error}")
             self.status_label.setText(message)
             self.undo_button.setEnabled(self.previous_text != self.current_text)
             self.apply_button.setEnabled(self.current_text != self.result)

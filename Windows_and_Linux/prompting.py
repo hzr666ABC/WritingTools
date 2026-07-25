@@ -73,10 +73,27 @@ def option_display_name(option_key: str, option: dict) -> str:
 def normalize_options(options: dict | None) -> dict:
     """Return a normalized copy that remains compatible with legacy files."""
 
-    normalized = deepcopy(options or {})
-    for key, option in normalized.items():
-        if not isinstance(option, dict):
+    if not isinstance(options, dict):
+        return {}
+    normalized = deepcopy(options)
+    for key, option in list(normalized.items()):
+        if not isinstance(key, str) or not key.strip() or not isinstance(option, dict):
+            normalized.pop(key, None)
             continue
+        prefix = option.get("prefix", "")
+        instruction = option.get("instruction", "")
+        option["prefix"] = "" if prefix is None else str(prefix)
+        option["instruction"] = "" if instruction is None else str(instruction)
+        if not isinstance(option.get("open_in_window"), bool):
+            option["open_in_window"] = False
+        if "label" in option:
+            option["label"] = (
+                str(option["label"]).strip() if option["label"] is not None else key
+            ) or key
+        if "icon" in option:
+            option["icon"] = (
+                str(option["icon"]).strip() if option["icon"] is not None else ""
+            )
         if key in BUILTIN_OPTION_LABELS_ZH_CN:
             option.setdefault("label", BUILTIN_OPTION_LABELS_ZH_CN[key])
         if option.get("icon") == "icons/custom":

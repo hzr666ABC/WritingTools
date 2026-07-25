@@ -8,12 +8,30 @@ import html
 import os
 import re
 import time
+from ctypes import wintypes
+
+
+def _configured_system_user32():
+    """Return user32 with pointer-width-safe signatures for HWND values."""
+
+    user32 = ctypes.windll.user32
+    user32.GetForegroundWindow.argtypes = []
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.IsWindow.argtypes = [wintypes.HWND]
+    user32.IsWindow.restype = wintypes.BOOL
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.IsIconic.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    return user32
 
 
 def capture_foreground_window() -> int | None:
     if os.name != "nt":
         return None
-    handle = int(ctypes.windll.user32.GetForegroundWindow())
+    handle = int(_configured_system_user32().GetForegroundWindow() or 0)
     return handle or None
 
 
@@ -33,8 +51,11 @@ def activate_window(
     """
     if os.name != "nt" or not handle:
         return False
-    user32 = user32 or ctypes.windll.user32
+    user32 = user32 or _configured_system_user32()
     window_handle = int(handle)
+
+    if not bool(user32.IsWindow(window_handle)):
+        return False
 
     if bool(user32.IsIconic(window_handle)):
         user32.ShowWindow(window_handle, 9)  # SW_RESTORE, minimized windows only

@@ -25,7 +25,7 @@ Response Flow:
    • The main app calls get_response() with a system instruction and a prompt.
    • The provider formats and sends the request to its API endpoint.
    • For operations that require a window (e.g. Summary, Key Points), the provider returns the full text.
-   • For direct text replacement, the provider emits the full text via the output_ready_signal.
+   • The provider returns complete text to the app's request coordinator.
    • Conversation history (for follow-up questions) is maintained by the main app.
 
 Note: Streaming has been fully removed throughout the code.
@@ -489,8 +489,8 @@ class GeminiProvider(AIProvider):
         list of OpenAI-style message dicts (the follow-up chat flow). In both
         cases we make a single-shot non-streaming request.
 
-        Returns the response text when `return_response` is True; otherwise emits
-        it via `output_ready_signal` for inline replacement.
+        Returns the response text to the request coordinator.  The legacy
+        ``return_response`` argument remains for API compatibility.
         """
         self.close_requested = False
 
@@ -505,15 +505,11 @@ class GeminiProvider(AIProvider):
 
             response_text = (response.text or "").rstrip('\n')
 
-            if not return_response and getattr(self.app, 'current_response_window', None) is None:
-                self.app.output_ready_signal.emit(response_text)
-                return ""
             return response_text
         except Exception as e:
             safe_error = redact_text(str(e), [getattr(self, "api_key", "")])
             logging.error(f"Error processing Gemini response: {safe_error}")
-            self.app.output_ready_signal.emit("An error occurred while processing the response.")
-            return ""
+            raise RuntimeError(f"Gemini 处理失败：{safe_error}") from None
         finally:
             self.close_requested = False
 
@@ -573,8 +569,7 @@ class OpenAICompatibleProvider(AIProvider):
         
         Always performs a non-streaming request.
         If prompt is not a list, builds a simple two-message conversation.
-        Returns the response text if return_response is True,
-        otherwise emits it via output_ready_signal.
+        Returns the response text to the request coordinator.
         """
         self.close_requested = False
 
@@ -596,21 +591,12 @@ class OpenAICompatibleProvider(AIProvider):
             )
             response_text = response.choices[0].message.content.strip()
 
-            if not return_response and getattr(self.app, 'current_response_window', None) is None:
-                self.app.output_ready_signal.emit(response_text)
             return response_text
 
         except Exception as e:
             error_str = redact_text(str(e), [getattr(self, "api_key", "")])
             logging.error(f"Error while generating content: {error_str}")
-            if "exceeded" in error_str or "rate limit" in error_str:
-                self.app.show_message_signal.emit(
-                    "请求频率受限",
-                    "API 已达到频率或用量限制，请稍后再试或调整设置。"
-                )
-            else:
-                self.app.show_message_signal.emit("错误", f"处理时发生错误：{error_str}")
-            return ""
+            raise RuntimeError(error_str) from None
 
     def after_load(self):
         self.client = OpenAI(
@@ -653,8 +639,7 @@ class OllamaProvider(AIProvider):
         Send a chat request to the Ollama server.
         
         Always performs a non-streaming request.
-        Returns the response text if return_response is True,
-        otherwise emits it via output_ready_signal.
+        Returns the response text to the request coordinator.
         """
         self.close_requested = False
 
@@ -669,14 +654,11 @@ class OllamaProvider(AIProvider):
         try:
             response = self.client.chat(model=self.api_model, messages=messages)
             response_text = response['message']['content'].strip()
-            if not return_response and getattr(self.app, 'current_response_window', None) is None:
-                self.app.output_ready_signal.emit(response_text)
             return response_text
         except Exception as e:
             safe_error = redact_text(str(e))
             logging.error(f"Error during Ollama chat: {safe_error}")
-            self.app.show_message_signal.emit("错误", f"Ollama 处理时发生错误：{safe_error}")
-            return ""
+            raise RuntimeError(f"Ollama 处理失败：{safe_error}") from None
 
     def after_load(self):
         self.client = OllamaClient(host=self.api_base)
