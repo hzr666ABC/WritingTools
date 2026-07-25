@@ -872,7 +872,7 @@ class WritingToolApp(QtWidgets.QApplication):
             prompt_prefix = selected_prompt.get('prefix', '')
             system_instruction = compose_system_instruction(selected_prompt)
             if option == 'Custom':
-                prompt = f"{prompt_prefix}Described change: {custom_change}\n\nText: {selected_text}"
+                prompt = f"{prompt_prefix}用户要求：{custom_change}\n\n待修改内容：\n{selected_text}"
             else:
                 prompt = f"{prompt_prefix}{selected_text}"
 
@@ -1000,8 +1000,9 @@ class WritingToolApp(QtWidgets.QApplication):
             logging.warning('No source window handle is available; left result on clipboard')
             return False
 
-        activate_window(self.source_window_handle)
-        time.sleep(0.16)
+        if not activate_window(self.source_window_handle):
+            logging.warning('Unable to reactivate the source window; left result on clipboard')
+            return False
         try:
             kbrd = pykeyboard.Controller()
             paste_key = pykeyboard.KeyCode.from_vk(0x56) if os.name == 'nt' else 'v'
@@ -1011,7 +1012,7 @@ class WritingToolApp(QtWidgets.QApplication):
                 paste_key,
                 modifier_already_down=modifier_is_physically_down('ctrl'),
             )
-            time.sleep(0.22)
+            time.sleep(0.12)
             pyperclip.copy(clipboard_backup)
             return True
         except Exception as error:

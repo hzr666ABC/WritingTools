@@ -11,13 +11,13 @@ from __future__ import annotations
 from copy import deepcopy
 
 
-BASE_CUSTOM_PRESET_INSTRUCTION = """You are a precise writing and coding assistant.
-Apply the preset objective to the user's selected text.
-Output ONLY the final transformed text or code, without explanations, labels, prefaces, or quotation marks.
-Preserve the input language unless the preset objective explicitly requests a translation.
-Preserve the original meaning, factual details, structure, and formatting unless the preset objective explicitly asks to change them.
-Do not answer or respond conversationally to the selected text.
-If the selected text is incompatible with the preset objective, output exactly \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\"."""
+BASE_CUSTOM_PRESET_INSTRUCTION = """你是一名严谨的写作与代码修改助手。
+请把预设目标应用到用户选中的文本。
+只输出修改后的最终文本或代码，不要附加解释、标签、前言、引号或思考过程。
+除非预设明确要求翻译，否则保持输入语言不变。
+除非预设明确要求改变，否则保留原意、事实、专有名词、数字、结构和格式。
+不要把选中文本当作对话来回答。
+如果选中文本与预设目标完全不相容，只输出 \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\"。"""
 
 
 BUILTIN_OPTION_LABELS_ZH_CN = {
@@ -55,7 +55,7 @@ def compose_system_instruction(option: dict) -> str:
         return BASE_CUSTOM_PRESET_INSTRUCTION
     return (
         f"{BASE_CUSTOM_PRESET_INSTRUCTION}\n\n"
-        "Preset objective supplied by the user:\n"
+        "用户定义的预设目标：\n"
         f"{objective}"
     )
 

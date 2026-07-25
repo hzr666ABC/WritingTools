@@ -98,6 +98,8 @@ def _load_local_vault_key() -> bytes:
     create_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         create_flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_BINARY"):
+        create_flags |= os.O_BINARY
     try:
         descriptor = os.open(path, create_flags, 0o600)
     except FileExistsError:
