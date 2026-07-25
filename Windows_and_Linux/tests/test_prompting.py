@@ -19,7 +19,7 @@ class PromptingTests(unittest.TestCase):
 
         self.assertIn(BASE_CUSTOM_PRESET_INSTRUCTION, instruction)
         self.assertIn("把文字改成适合小红书发布的语气。", instruction)
-        self.assertIn("Output ONLY", instruction)
+        self.assertIn("只输出修改后的最终文本", instruction)
 
     def test_legacy_custom_icon_automatically_receives_base_rules(self):
         instruction = compose_system_instruction(

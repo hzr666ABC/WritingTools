@@ -7,6 +7,7 @@ import difflib
 import html
 import os
 import re
+import time
 
 
 def capture_foreground_window() -> int | None:
@@ -16,12 +17,38 @@ def capture_foreground_window() -> int | None:
     return handle or None
 
 
-def activate_window(handle: int | None) -> bool:
+def activate_window(
+    handle: int | None,
+    *,
+    activation_timeout: float = 0.14,
+    poll_interval: float = 0.01,
+    user32=None,
+) -> bool:
+    """Focus a source window without changing its normal/maximized state.
+
+    ``SW_RESTORE`` changes a maximized or browser-fullscreen window back to a
+    normal window.  Only use it when Windows explicitly reports that the source
+    is minimized, then wait briefly for foreground activation instead of making
+    every caller sleep for a fixed interval.
+    """
     if os.name != "nt" or not handle:
         return False
-    user32 = ctypes.windll.user32
-    user32.ShowWindow(int(handle), 9)  # SW_RESTORE
-    return bool(user32.SetForegroundWindow(int(handle)))
+    user32 = user32 or ctypes.windll.user32
+    window_handle = int(handle)
+
+    if bool(user32.IsIconic(window_handle)):
+        user32.ShowWindow(window_handle, 9)  # SW_RESTORE, minimized windows only
+
+    if int(user32.GetForegroundWindow()) == window_handle:
+        return True
+
+    activation_requested = bool(user32.SetForegroundWindow(window_handle))
+    deadline = time.monotonic() + max(0.0, activation_timeout)
+    while time.monotonic() < deadline:
+        if int(user32.GetForegroundWindow()) == window_handle:
+            return True
+        time.sleep(max(0.001, poll_interval))
+    return activation_requested and int(user32.GetForegroundWindow()) == window_handle
 
 
 def _tokens(text: str) -> list[str]:
