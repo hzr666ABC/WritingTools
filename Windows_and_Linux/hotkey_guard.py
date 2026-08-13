@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import time
 
 
 _MODIFIER_ALIASES = {
@@ -111,6 +112,128 @@ def hotkey_modifiers_are_physically_active(
         if not any(int(state) & 0x8000 for state in known_states):
             return False
     return True
+
+
+def hotkey_modifiers_match_exactly(
+    hotkey: str,
+    *,
+    platform_name: str | None = None,
+    state_reader=None,
+) -> bool:
+    """Require the configured modifiers and reject every extra modifier.
+
+    GlobalHotKeys may consider ``Ctrl+Shift+Space`` a match for
+    ``Ctrl+Space`` because the required subset is down. Exact validation keeps
+    nested chords from dispatching two product modes at once.
+    """
+
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name != "nt":
+        return True
+    required = {
+        normalized
+        for token in _hotkey_tokens(hotkey)
+        if (normalized := _MODIFIER_ALIASES.get(token))
+    }
+    reader = state_reader or _windows_key_state
+    for modifier, virtual_keys in _MODIFIER_VIRTUAL_KEYS.items():
+        states = []
+        for virtual_key in virtual_keys:
+            try:
+                states.append(reader(virtual_key))
+            except (AttributeError, OSError):
+                states.append(None)
+        known_states = [state for state in states if state is not None]
+        if not known_states:
+            continue
+        pressed = any(int(state) & 0x8000 for state in known_states)
+        if pressed != (modifier in required):
+            return False
+    return True
+
+
+def hotkey_has_extra_modifiers(
+    hotkey: str,
+    *,
+    platform_name: str | None = None,
+    state_reader=None,
+) -> bool:
+    """Report only modifiers that are not part of a native hotkey chord.
+
+    ``RegisterHotKey`` already proves the required modifiers were present when
+    Windows queued ``WM_HOTKEY``. By the time a worker thread handles that
+    message the user may have released them, so requiring them to remain down
+    creates intermittent missed activations. Extra modifiers are still checked
+    while they are physically held to keep nested chords separated.
+    """
+
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name != "nt":
+        return False
+    required = {
+        normalized
+        for token in _hotkey_tokens(hotkey)
+        if (normalized := _MODIFIER_ALIASES.get(token))
+    }
+    reader = state_reader or _windows_key_state
+    for modifier, virtual_keys in _MODIFIER_VIRTUAL_KEYS.items():
+        if modifier in required:
+            continue
+        states = []
+        for virtual_key in virtual_keys:
+            try:
+                states.append(reader(virtual_key))
+            except (AttributeError, OSError):
+                states.append(None)
+        if any(
+            int(state) & 0x8000
+            for state in states
+            if state is not None
+        ):
+            return True
+    return False
+
+
+def wait_for_hotkey_modifiers_release(
+    hotkey: str,
+    *,
+    timeout_seconds: float = 0.6,
+    poll_seconds: float = 0.01,
+    platform_name: str | None = None,
+    state_reader=None,
+) -> bool:
+    """Wait briefly for a triggering chord to be released before injection.
+
+    The Prompt shortcut contains Shift by default. Injecting Ctrl+C while
+    Shift is still physically held would become Ctrl+Shift+C in the source
+    application, so optional-selection capture starts only after every
+    modifier in the trigger has been released.
+    """
+
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name != "nt":
+        return True
+    modifiers = []
+    for token in _hotkey_tokens(hotkey):
+        modifier = _MODIFIER_ALIASES.get(token)
+        if modifier and modifier not in modifiers:
+            modifiers.append(modifier)
+    if not modifiers:
+        return True
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while True:
+        if not any(
+            modifier_is_physically_down(
+                modifier,
+                platform_name=platform_name,
+                state_reader=state_reader,
+            )
+            for modifier in modifiers
+        ):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(max(0.001, float(poll_seconds)))
 
 
 def send_modified_key(controller, modifier_key, key, *, modifier_already_down=False):

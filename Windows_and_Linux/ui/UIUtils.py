@@ -5,6 +5,7 @@ from PySide6 import QtGui, QtCore, QtWidgets
 from PySide6.QtGui import QImage, QPixmap
 
 import darkdetect
+from ui.VisualSystem import MotionController, global_stylesheet, palette
 colorMode = 'dark' if darkdetect.isDark() else 'light'
 
 class UIUtils:
@@ -44,6 +45,8 @@ class UIUtils:
         # Set the window icon
         icon_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'app_icon.png')
         if os.path.exists(icon_path): base.setWindowIcon(QtGui.QIcon(icon_path))
+        base.setStyleSheet(global_stylesheet(colorMode))
+        base.motion = MotionController(base)
         main_layout = QtWidgets.QVBoxLayout(base)
         main_layout.setContentsMargins(0, 0, 0, 0)
         app = getattr(base, 'app', None)
@@ -105,16 +108,49 @@ class ThemeBackground(QtWidgets.QWidget):
         else:
             self._paint_plain_background(painter)
 
+        # A hairline border keeps translucent windows crisp on bright and dark
+        # desktop backgrounds without turning the surface into a heavy card.
+        border = QtGui.QColor("#FFFFFF")
+        border.setAlpha(40 if colorMode == "dark" else 216)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.setPen(QtGui.QPen(border, 1))
+        inset = QtCore.QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+        painter.drawRoundedRect(inset, self.border_radius, self.border_radius)
+
     def _paint_plain_background(self, painter):
-        color = (
-            QtGui.QColor(24, 27, 36, 248)
-            if colorMode == 'dark'
-            else QtGui.QColor(247, 248, 252, 250)
+        p = palette(colorMode)
+        rect = QtCore.QRectF(0, 0, self.width(), self.height())
+        base = QtGui.QLinearGradient(0, 0, self.width(), self.height())
+        if colorMode == "dark":
+            base.setColorAt(0, QtGui.QColor("#1A1D28"))
+            base.setColorAt(0.55, QtGui.QColor(p["canvas"]))
+            base.setColorAt(1, QtGui.QColor("#141720"))
+        else:
+            base.setColorAt(0, QtGui.QColor("#FCFDFF"))
+            base.setColorAt(0.62, QtGui.QColor(p["canvas"]))
+            base.setColorAt(1, QtGui.QColor("#F1F4FA"))
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(base)
+        painter.drawRoundedRect(rect, self.border_radius, self.border_radius)
+
+        accent_glow = QtGui.QRadialGradient(
+            QtCore.QPointF(self.width() * 0.86, self.height() * 0.02),
+            max(self.width() * 0.72, 180),
         )
-        painter.setBrush(QtGui.QBrush(color))
-        painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0, 0)))
-        painter.drawRoundedRect(
-            QtCore.QRect(0, 0, self.width(), self.height()),
-            self.border_radius,
-            self.border_radius,
+        accent = QtGui.QColor(p["accent"])
+        accent.setAlpha(30 if colorMode == "dark" else 22)
+        accent_glow.setColorAt(0, accent)
+        accent_glow.setColorAt(1, QtGui.QColor(0, 0, 0, 0))
+        painter.setBrush(accent_glow)
+        painter.drawRect(rect)
+
+        cyan_glow = QtGui.QRadialGradient(
+            QtCore.QPointF(self.width() * 0.04, self.height() * 0.96),
+            max(self.width() * 0.58, 160),
         )
+        cyan = QtGui.QColor(p["cyan"])
+        cyan.setAlpha(14 if colorMode == "dark" else 11)
+        cyan_glow.setColorAt(0, cyan)
+        cyan_glow.setColorAt(1, QtGui.QColor(0, 0, 0, 0))
+        painter.setBrush(cyan_glow)
+        painter.drawRect(rect)

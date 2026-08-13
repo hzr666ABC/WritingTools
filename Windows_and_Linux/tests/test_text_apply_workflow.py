@@ -11,6 +11,7 @@ class TextApplyWorkflowTests(unittest.TestCase):
         return SimpleNamespace(source_window_handle=source_window_handle)
 
     @patch("WritingToolApp.time.sleep")
+    @patch("WritingToolApp.restore_ime_state")
     @patch("WritingToolApp.send_modified_key")
     @patch("WritingToolApp.pykeyboard.Controller")
     @patch("WritingToolApp.activate_window", return_value=True)
@@ -21,18 +22,51 @@ class TextApplyWorkflowTests(unittest.TestCase):
         activate,
         controller,
         send_key,
+        restore_ime,
         sleep,
     ):
         clipboard.paste.return_value = "之前的剪贴板"
+        state = {"open": True, "conversion": 1, "sentence": 0}
 
-        result = WritingToolApp.apply_text_to_source(self._app(), "改写结果")
+        result = WritingToolApp.apply_text_to_source(
+            self._app(), "改写结果", ime_state=state
+        )
 
         self.assertTrue(result)
         self.assertEqual(clipboard.copy.call_args_list[0].args, ("改写结果",))
         self.assertEqual(clipboard.copy.call_args_list[-1].args, ("之前的剪贴板",))
         activate.assert_called_once_with(200)
         send_key.assert_called_once()
+        self.assertEqual(restore_ime.call_count, 2)
+        restore_ime.assert_called_with(state, 200)
         sleep.assert_called_once_with(0.12)
+
+    @patch("WritingToolApp.time.sleep")
+    @patch("WritingToolApp.restore_ime_state")
+    @patch("WritingToolApp.send_modified_key")
+    @patch("WritingToolApp.pykeyboard.Controller")
+    @patch("WritingToolApp.activate_window", return_value=True)
+    @patch("WritingToolApp.pyperclip")
+    def test_explicit_source_handle_overrides_latest_global_capture(
+        self,
+        clipboard,
+        activate,
+        controller,
+        send_key,
+        restore_ime,
+        sleep,
+    ):
+        clipboard.paste.return_value = "之前的剪贴板"
+        app = self._app(source_window_handle=900)
+
+        result = WritingToolApp.apply_text_to_source(
+            app,
+            "Prompt 结果",
+            source_window_handle=321,
+        )
+
+        self.assertTrue(result)
+        activate.assert_called_once_with(321)
 
     @patch("WritingToolApp.send_modified_key")
     @patch("WritingToolApp.pykeyboard.Controller")
@@ -47,7 +81,10 @@ class TextApplyWorkflowTests(unittest.TestCase):
     ):
         clipboard.paste.return_value = "之前的剪贴板"
 
-        result = WritingToolApp.apply_text_to_source(self._app(), "改写结果")
+        state = {"open": True, "conversion": 1, "sentence": 0}
+        result = WritingToolApp.apply_text_to_source(
+            self._app(), "改写结果", ime_state=state
+        )
 
         self.assertFalse(result)
         clipboard.copy.assert_called_once_with("改写结果")

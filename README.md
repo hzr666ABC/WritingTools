@@ -23,6 +23,7 @@ Writing Tools 中文增强版是一款 Windows 全局 AI 写作助手。选中�
 - 自定义提示词与内置基础提示词组合，提升预设输出稳定性。
 - 安全应用：应用前差异对比、撤销、恢复原文。
 - Provider Studio：服务地址、模型、连通性与兼容性诊断。
+- 独立 Prompt 工作台：9 个内置场景、自定义变量模板、极速/平衡/深度策略、加密收藏与版本、可确认的备用模型重试。
 - 本地安全密钥库：Windows 使用 DPAPI；Linux/macOS 后备实现使用 AES-256-GCM。
 - 加密历史与版本恢复、预设导入导出和分享。
 - 依赖哈希锁定、Git 历史密钥扫描、静态安全分析与 SBOM。
@@ -48,11 +49,23 @@ Writing Tools 中文增强版是一款 Windows 全局 AI 写作助手。选中�
 
 快捷弹窗支持方向键、Enter、Esc 和数字键快速选择。API Key 只应填写在应用的安全密钥库中，不要写入代码、Issue、日志或预设导出文件。
 
+### Prompt 工作台
+
+Prompt 工作台与主写作功能彼此独立：默认按 `Ctrl+Shift+P` 打开，选中的文字会作为待优化输入；没有选区时可直接输入需求。检查或补充内容后点击开始，系统才会调用单独配置的 Prompt AI。可选择智能梳理、写作、研究、代码、产品、决策、沟通、图片视频或严格评审场景，也能创建带 `[变量]` 的自定义场景。内置场景会区分真实目标、对象、已知事实、约束、成功标准、假设与待补信息；平衡和深度模式按轮次每次只问一个会改变结果的问题。
+
+主写作快捷键沿用 `Ctrl+Space`，Prompt 工作台使用 `Ctrl+Shift+P`。回填改写结果前后会尽力恢复原窗口的 IME 开启与转换状态，避免完成后意外切到英文输入。
+
+在 Windows 上，默认 `Ctrl+Space` 和 `Ctrl+Shift+P` 都使用原生全局热键注册，按键不会继续透传给中文输入法或被当前应用抢先处理。Prompt 工作台的多行输入框会在拼音预编辑期间隐藏占位提示，避免候选拼音与灰色提示重叠。主改写窗口与 Prompt 工作台都会逐字显示流式内容；最终页还会单独展示一份“需求梳理”。
+
+最终 Prompt 默认只复制，不会自动发送给其他 AI。需要替换原选区时，会先显示差异并要求再次确认。Prompt AI 的 Provider、API Key、服务地址和模型均在“Prompt 设置”中单独填写，不会从主写作设置复制密钥。
+
 ## 隐私与安全
 
 - API Key 在 Windows 上通过当前用户的 DPAPI 加密保存。
 - 历史正文加密保存在本地；部分用于列表展示的时间、类型等元数据可能保持明文。
 - 使用云端 Provider 时，用户选中的文本和提示词会发送给对应服务商处理。
+- 打开 Prompt 工作台本身不会上传内容；只有点击开始、回答澄清或继续微调时才会发送当前会话所需上下文。
+- Prompt 对话正文默认只保存在内存中，关闭后清除；可选长期偏好仅保存经过白名单限制的结构化字段并加密。
 - 使用本地 Ollama 时，可将推理数据保留在本机。
 - 诊断报告默认对密钥、URL 凭据、用户目录和敏感路径进行脱敏。
 - 项目不附带任何开发者或用户的 API Key。
@@ -112,6 +125,6 @@ python scripts/security_check.py --history
 
 ## 项目来源与许可证
 
-本项目修改自 [theJayTea/WritingTools](https://github.com/theJayTea/WritingTools)，感谢 Jesai、Arya Mirsepasi 以及所有上游贡献者。
+本项目修改自 [theJayTea/WritingTools](https://github.com/theJayTea/WritingTools)，感谢 Jesai、Arya Mirsepasi 以及所有上游贡献者。Prompt 工作台的行为契约参考并重新实现自 MIT 许可的 [gaoyechen/SharpInput](https://github.com/gaoyechen/SharpInput) v3.3。
 
-本项目继续按照 [GNU General Public License v3.0](LICENSE) 发布。分发修改后的二进制时，必须同时向用户提供对应源代码，并保留原项目的版权、许可证和修改说明。第三方组件信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+详细的继承范围、参考快照、独立实现边界和许可证关系见 [来源、参考与许可说明](REFERENCES.md)。本项目继续按照 [GNU General Public License v3.0](LICENSE) 发布。分发修改后的二进制时，必须同时向用户提供对应源代码，并保留原项目的版权、许可证和修改说明。第三方组件信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。

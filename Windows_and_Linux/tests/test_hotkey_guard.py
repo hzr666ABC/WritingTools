@@ -1,9 +1,12 @@
 import unittest
 
 from hotkey_guard import (
+    hotkey_has_extra_modifiers,
     hotkey_modifiers_are_physically_active,
+    hotkey_modifiers_match_exactly,
     modifier_is_physically_down,
     send_modified_key,
+    wait_for_hotkey_modifiers_release,
 )
 
 
@@ -22,6 +25,64 @@ class _FakeController:
 
 
 class HotkeyGuardTests(unittest.TestCase):
+    def test_native_guard_allows_released_required_keys_but_rejects_extras(self):
+        self.assertFalse(
+            hotkey_has_extra_modifiers(
+                "ctrl+shift+p",
+                platform_name="nt",
+                state_reader=self._reader(),
+            )
+        )
+        self.assertTrue(
+            hotkey_has_extra_modifiers(
+                "ctrl+space",
+                platform_name="nt",
+                state_reader=self._reader(0x10),
+            )
+        )
+
+    def test_exact_match_rejects_extra_shift_for_main_shortcut(self):
+        self.assertFalse(
+            hotkey_modifiers_match_exactly(
+                "ctrl+space",
+                platform_name="nt",
+                state_reader=self._reader(0x11, 0x10),
+            )
+        )
+        self.assertTrue(
+            hotkey_modifiers_match_exactly(
+                "ctrl+shift+p",
+                platform_name="nt",
+                state_reader=self._reader(0x11, 0x10),
+            )
+        )
+
+    def test_prompt_capture_waits_until_trigger_modifiers_are_released(self):
+        states = iter([0x8000, 0x8000, 0, 0])
+
+        def reader(_virtual_key):
+            return next(states, 0)
+
+        self.assertTrue(
+            wait_for_hotkey_modifiers_release(
+                "ctrl+shift+space",
+                timeout_seconds=0.1,
+                poll_seconds=0.001,
+                platform_name="nt",
+                state_reader=reader,
+            )
+        )
+
+    def test_prompt_capture_aborts_when_trigger_modifiers_never_release(self):
+        self.assertFalse(
+            wait_for_hotkey_modifiers_release(
+                "ctrl+shift+space",
+                timeout_seconds=0,
+                platform_name="nt",
+                state_reader=lambda _virtual_key: 0x8000,
+            )
+        )
+
     @staticmethod
     def _reader(*pressed_keys):
         pressed = set(pressed_keys)

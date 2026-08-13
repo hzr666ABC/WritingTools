@@ -12,12 +12,25 @@ _log_level_name = os.environ.get("WRITINGTOOLS_LOG_LEVEL", "INFO").upper()
 _log_level = getattr(logging, _log_level_name, logging.INFO)
 logging.basicConfig(level=_log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
+_DEFAULT_INSTANCE_NAME = "WritingToolsCN.Desktop.Instance"
+
+
+def configured_instance_name():
+    """Allow an explicitly launched test build to use an isolated mutex."""
+
+    candidate = os.environ.get("WRITINGTOOLS_INSTANCE_NAME", "").strip()
+    if candidate and len(candidate) <= 120 and all(
+        character.isalnum() or character in "._-" for character in candidate
+    ):
+        return candidate
+    return _DEFAULT_INSTANCE_NAME
+
 
 def main():
     """
     The main entry point of the application.
     """
-    with SingleInstanceGuard() as instance_guard:
+    with SingleInstanceGuard(configured_instance_name()) as instance_guard:
         if instance_guard.already_running:
             instance_guard.notify_existing()
             return 0

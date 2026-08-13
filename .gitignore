@@ -3,6 +3,9 @@
 .DS_Store
 Windows_and_Linux/config.json
 Windows_and_Linux/history.json
+Windows_and_Linux/prompt_preferences.json
+Windows_and_Linux/prompt_presets.json
+Windows_and_Linux/prompt_library.json
 Windows_and_Linux/*.tmp
 Windows_and_Linux/*.log
 Windows_and_Linux/dist/

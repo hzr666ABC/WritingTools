@@ -1,6 +1,10 @@
 import unittest
 
-from settings_logic import find_hotkey_conflict, provider_index_by_name
+from settings_logic import (
+    find_hotkey_conflict,
+    find_named_hotkey_conflict,
+    provider_index_by_name,
+)
 
 
 class SettingsLogicTests(unittest.TestCase):
@@ -16,6 +20,33 @@ class SettingsLogicTests(unittest.TestCase):
         }
         self.assertEqual(find_hotkey_conflict(options, " CTRL+J "), "Rewrite")
         self.assertIsNone(find_hotkey_conflict(options, "ctrl+k"))
+
+    def test_named_hotkey_conflicts_keep_main_and_prompt_isolated(self):
+        options = {"Rewrite": {"hotkey": "ctrl+j"}}
+        self.assertEqual(
+            find_named_hotkey_conflict(
+                "ctrl+space",
+                main_shortcut="ctrl+space",
+                prompt_shortcut="ctrl+shift+space",
+                options=options,
+                ignore="prompt",
+            ),
+            "main",
+        )
+        self.assertEqual(
+            find_named_hotkey_conflict(
+                "ctrl+shift+space",
+                main_shortcut="ctrl+space",
+                prompt_shortcut="ctrl+shift+space",
+                options=options,
+                ignore="main",
+            ),
+            "prompt",
+        )
+        self.assertEqual(
+            find_named_hotkey_conflict("ctrl+j", options=options),
+            "option:Rewrite",
+        )
 
 
 if __name__ == "__main__":

@@ -312,6 +312,21 @@ class AIProvider(ABC):
         self.logo = logo
         self.button_text = button_text
         self.button_action = button_action
+        self.config_namespace = "providers"
+
+    def set_config_namespace(self, namespace: str):
+        """Select an isolated top-level configuration profile.
+
+        The default remains ``providers`` for the writing workflow. The
+        Prompt Workbench uses ``prompt_providers`` so saving one profile can
+        never overwrite credentials or model choices from the other.
+        """
+
+        if namespace not in {"providers", "prompt_providers"}:
+            raise ValueError(f"Unsupported provider config namespace: {namespace}")
+        self.config_namespace = namespace
+        self.max_output_tokens = 4096 if namespace == "prompt_providers" else 1000
+        return self
 
     @abstractmethod
     def get_response(self, system_instruction: str, prompt: str) -> str:
@@ -346,7 +361,8 @@ class AIProvider(ABC):
             if setting.name == "api_key":
                 value = protect_secret(value)
             config[setting.name] = value
-        self.app.config["providers"][self.provider_name] = config
+        provider_store = self.app.config.setdefault(self.config_namespace, {})
+        provider_store[self.provider_name] = config
         self.app.save_config(self.app.config)
 
     @abstractmethod
@@ -456,7 +472,7 @@ class GeminiProvider(AIProvider):
         kwargs = {
             "system_instruction": system_instruction,
             "safety_settings": self._SAFETY_SETTINGS,
-            "max_output_tokens": 1000,
+            "max_output_tokens": getattr(self, "max_output_tokens", 1000),
         }
         if not is_gemma:
             kwargs["thinking_config"] = genai_types.ThinkingConfig(thinking_level="minimal")
@@ -481,7 +497,7 @@ class GeminiProvider(AIProvider):
             contents.append(genai_types.Content(role=gemini_role, parts=[genai_types.Part(text=text)]))
         return contents
 
-    def get_response(self, system_instruction: str, prompt, return_response: bool = False) -> str:
+    def get_response(self, system_instruction: str, prompt, return_response: bool = False, request_options=None, progress_callback=None) -> str:
         """
         Generate content using Gemini.
 
@@ -504,6 +520,9 @@ class GeminiProvider(AIProvider):
             )
 
             response_text = (response.text or "").rstrip('\n')
+
+            if progress_callback and response_text:
+                progress_callback(len(response_text), response_text)
 
             return response_text
         except Exception as e:
@@ -563,11 +582,12 @@ class OpenAICompatibleProvider(AIProvider):
             "• 使用时请遵守对应服务的条款。",
             "openai", "获取 OpenAI API 密钥", lambda: webbrowser.open("https://platform.openai.com/account/api-keys"))
 
-    def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False) -> str:
+    def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False, request_options=None, progress_callback=None) -> str:
         """
         Send a chat request to the OpenAI-compatible API.
         
-        Always performs a non-streaming request.
+        Streams by default so callers can expose generation progress while
+        still receiving one complete response string at the end.
         If prompt is not a list, builds a simple two-message conversation.
         Returns the response text to the request coordinator.
         """
@@ -583,13 +603,41 @@ class OpenAICompatibleProvider(AIProvider):
 
         try:
             validate_base_url(OPENAI_COMPATIBLE, self.api_base)
-            response = self.client.chat.completions.create(
+            options = dict(request_options or {})
+            stream = bool(options.pop("stream", bool(progress_callback)))
+            params = dict(
                 model=self.api_model,
                 messages=messages,
-                temperature=0.5,
-                stream=False
+                stream=stream,
             )
-            response_text = response.choices[0].message.content.strip()
+            for key in ("temperature", "max_tokens", "max_completion_tokens", "response_format", "reasoning_effort", "timeout"):
+                if key in options and options[key] is not None:
+                    params[key] = options.pop(key)
+            extra_body = dict(options.pop("extra_body", {}) or {})
+            extra_body.update(options)
+            if extra_body:
+                params["extra_body"] = extra_body
+            response = self.client.chat.completions.create(**params)
+            if stream:
+                parts = []
+                emitted = 0
+                for chunk in response:
+                    if self.close_requested:
+                        raise RuntimeError("请求已取消")
+                    if not getattr(chunk, "choices", None):
+                        continue
+                    delta = getattr(chunk.choices[0], "delta", None)
+                    text = getattr(delta, "content", "") or ""
+                    if text:
+                        parts.append(text)
+                        emitted += len(text)
+                        if progress_callback:
+                            progress_callback(emitted, "".join(parts))
+                response_text = "".join(parts).strip()
+            else:
+                response_text = (response.choices[0].message.content or "").strip()
+                if progress_callback and response_text:
+                    progress_callback(len(response_text), response_text)
 
             return response_text
 
@@ -603,7 +651,9 @@ class OpenAICompatibleProvider(AIProvider):
             api_key=self.api_key,
             base_url=self.api_base,
             organization=self.api_organisation,
-            project=self.api_project
+            project=self.api_project,
+            timeout=120.0,
+            max_retries=1,
         )
 
     def before_load(self):
@@ -634,7 +684,7 @@ class OllamaProvider(AIProvider):
             "ollama", "查看 Ollama 设置说明",
             lambda: webbrowser.open("https://github.com/theJayTea/WritingTools?tab=readme-ov-file#-optional-ollama-local-llm-instructions-for-windows-v7-onwards"))
 
-    def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False) -> str:
+    def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False, request_options=None, progress_callback=None) -> str:
         """
         Send a chat request to the Ollama server.
         
@@ -654,6 +704,8 @@ class OllamaProvider(AIProvider):
         try:
             response = self.client.chat(model=self.api_model, messages=messages)
             response_text = response['message']['content'].strip()
+            if progress_callback and response_text:
+                progress_callback(len(response_text), response_text)
             return response_text
         except Exception as e:
             safe_error = redact_text(str(e))
