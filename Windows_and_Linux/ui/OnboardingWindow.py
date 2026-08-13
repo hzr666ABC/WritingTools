@@ -73,7 +73,7 @@ class OnboardingWindow(QtWidgets.QWidget):
             border-radius: 9px;
         """)
         self.content_layout.addWidget(self.shortcut_input)
-        shortcut_hint = QtWidgets.QLabel("点击输入框后直接按下快捷键；Backspace/Delete 可清除。")
+        shortcut_hint = QtWidgets.QLabel("应用改写结果时会尽力恢复原窗口的中文输入法状态。")
         shortcut_hint.setStyleSheet(
             f"font-size: 12px; color: {'#b9bfd9' if colorMode == 'dark' else '#778096'};"
         )

@@ -93,20 +93,24 @@ def run_pyinstaller_build():
 
         # Run PyInstaller
         subprocess.run(pyinstaller_command, check=True, cwd=source_dir)  # nosec B603
-        shutil.copy2(source_dir.parent / "LICENSE", source_dir / "dist" / "LICENSE")
-        shutil.copy2(
-            source_dir.parent / "THIRD_PARTY_NOTICES.md",
-            source_dir / "dist" / "THIRD_PARTY_NOTICES.md",
-        )
+        dist_dir = source_dir / "dist"
+        for filename in (
+            "background.png",
+            "background_dark.png",
+            "background_popup.png",
+            "background_popup_dark.png",
+            "options.json",
+        ):
+            shutil.copy2(source_dir / filename, dist_dir / filename)
+        shutil.copytree(source_dir / "icons", dist_dir / "icons")
+        for filename in ("LICENSE", "NOTICE.md", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md"):
+            shutil.copy2(source_dir.parent / filename, dist_dir / filename)
         print("Build completed successfully!")
 
         # Clean up unnecessary files
         for target in (source_dir / "build", source_dir / "__pycache__"):
             if target.exists():
                 shutil.rmtree(target)
-
-        # No need to copy data files manually since they are included
-        # in the executable using --add-data
 
     except subprocess.CalledProcessError as e:
         print(f"Build failed with error: {e}")

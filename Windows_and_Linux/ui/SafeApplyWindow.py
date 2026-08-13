@@ -8,6 +8,13 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from text_application import build_diff_html
 from ui.UIUtils import UIUtils, colorMode
+from ui.VisualSystem import (
+    ActivityIndicator,
+    button_style,
+    editor_style,
+    install_button_motion,
+    palette,
+)
 
 
 class SafeApplyWindow(QtWidgets.QWidget):
@@ -26,25 +33,7 @@ class SafeApplyWindow(QtWidgets.QWidget):
 
     @staticmethod
     def _button_style(primary=False, danger=False):
-        if primary:
-            background, hover, foreground = "#5b69e9", "#4d5bd7", "white"
-        elif danger:
-            background, hover, foreground = (
-                ("#4a2f37", "#5b3843", "#ffdfe5") if colorMode == "dark"
-                else ("#fff2f4", "#ffe4e9", "#a52c42")
-            )
-        else:
-            background, hover, foreground = (
-                ("#303541", "#3b4150", "#edf0ff") if colorMode == "dark"
-                else ("#f7f8fc", "#eceffd", "#42485a")
-            )
-        return f"""
-            QPushButton {{ min-height: 38px; padding: 3px 15px; border: none;
-                border-radius: 10px; background: {background}; color: {foreground};
-                font-size: 13px; font-weight: 600; }}
-            QPushButton:hover {{ background: {hover}; }}
-            QPushButton:disabled {{ background: #d8dbe6; color: #9298a8; }}
-        """
+        return button_style(colorMode, primary=primary, danger=danger)
 
     def _build_ui(self):
         UIUtils.setup_window_and_layout(self)
@@ -55,7 +44,7 @@ class SafeApplyWindow(QtWidgets.QWidget):
         title_row = QtWidgets.QHBoxLayout()
         title = QtWidgets.QLabel("确认 AI 修改")
         title.setStyleSheet(
-            f"font-size: 24px; font-weight: 700; color: {'#f4f6ff' if colorMode == 'dark' else '#202638'};"
+            f"font-size:24px;font-weight:700;color:{palette(colorMode)['text']};"
         )
         title_row.addWidget(title)
         title_row.addStretch()
@@ -63,14 +52,14 @@ class SafeApplyWindow(QtWidgets.QWidget):
             f"{self.entry.get('option', '写作')} · 版本 {self.entry.get('version', 1)}"
         )
         version.setStyleSheet(
-            f"color: {'#aeb5ce' if colorMode == 'dark' else '#747c91'}; font-size: 12px;"
+            f"color:{palette(colorMode)['muted']};font-size:12px;"
         )
         title_row.addWidget(version)
         layout.addLayout(title_row)
 
         helper = QtWidgets.QLabel("先查看变化，再决定应用。关闭窗口不会修改原文。")
         helper.setStyleSheet(
-            f"color: {'#aeb5ce' if colorMode == 'dark' else '#687087'}; font-size: 13px;"
+            f"color:{palette(colorMode)['text_soft']};font-size:13px;"
         )
         layout.addWidget(helper)
 
@@ -90,17 +79,19 @@ class SafeApplyWindow(QtWidgets.QWidget):
             editor = QtWidgets.QPlainTextEdit(text)
             editor.setReadOnly(True)
             editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.WidgetWidth)
-            editor.setStyleSheet(
-                f"border:none;padding:12px;font-size:14px;line-height:1.6;background:{'#242833' if colorMode == 'dark' else 'white'};color:{'#f0f2ff' if colorMode == 'dark' else '#202638'};"
-            )
+            editor.setStyleSheet(editor_style(colorMode, prominent=True))
             tabs.addTab(editor, label)
         layout.addWidget(tabs, 1)
 
+        status_row = QtWidgets.QHBoxLayout()
+        self.status_indicator = ActivityIndicator(colorMode)
+        status_row.addWidget(self.status_indicator)
         self.status_label = QtWidgets.QLabel("尚未应用")
         self.status_label.setStyleSheet(
-            f"color: {'#aeb5ce' if colorMode == 'dark' else '#687087'}; font-size: 12px;"
+            f"color:{palette(colorMode)['text_soft']};font-size:12px;"
         )
-        layout.addWidget(self.status_label)
+        status_row.addWidget(self.status_label, 1)
+        layout.addLayout(status_row)
 
         actions = QtWidgets.QHBoxLayout()
         copy_button = QtWidgets.QPushButton("复制结果")
@@ -130,13 +121,18 @@ class SafeApplyWindow(QtWidgets.QWidget):
         self.apply_button = QtWidgets.QPushButton("应用修改")
         self.apply_button.setStyleSheet(self._button_style(primary=True))
         self.apply_button.clicked.connect(self.apply_result)
+        install_button_motion(self.apply_button, colorMode, strong=True)
         actions.addWidget(self.apply_button)
         layout.addLayout(actions)
 
     def _apply(self, text: str, status: str, message: str):
         prior = self.current_text
         self.hide()
-        success = self.app.apply_text_to_source(text)
+        success = self.app.apply_text_to_source(
+            text,
+            source_window_handle=self.entry.get("source_window_handle"),
+            ime_state=self.entry.get("ime_state"),
+        )
         if success:
             self.previous_text = prior
             self.current_text = text
@@ -149,10 +145,12 @@ class SafeApplyWindow(QtWidgets.QWidget):
                     # failed operation.
                     logging.error(f"Unable to update history status: {error}")
             self.status_label.setText(message)
+            self.status_indicator.set_state("success")
             self.undo_button.setEnabled(self.previous_text != self.current_text)
             self.apply_button.setEnabled(self.current_text != self.result)
         else:
             self.status_label.setText("无法激活原窗口，结果已复制到剪贴板。")
+            self.status_indicator.set_state("error")
         QtCore.QTimer.singleShot(320, self._show_after_apply)
 
     def _show_after_apply(self):

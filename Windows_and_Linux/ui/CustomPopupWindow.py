@@ -24,6 +24,16 @@ from preset_share import export_preset_pack, load_preset_pack, merge_presets
 from preset_icon_library import PRESET_ICON_CHOICES, normalize_preset_icon
 from ui.ShortcutRecorder import ShortcutRecorder
 from ui.UIUtils import ThemeBackground, colorMode
+from ui.VisualSystem import (
+    MotionController,
+    button_style,
+    editor_style,
+    global_stylesheet,
+    install_button_motion,
+    install_focus_glow,
+    animations_enabled,
+    palette,
+)
 from quick_action_workflow import number_key_to_index
 
 _ = lambda x: x
@@ -185,22 +195,16 @@ class ButtonEditDialog(QDialog):
 
         intro = QLabel("预设只需描述目标；程序会自动附加稳定的基础指令，约束模型只输出处理后的文本、保持原语言和格式。")
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #69708a; font-size: 12px; padding: 10px 12px; background: #f1f3ff; border-radius: 9px;")
+        intro.setStyleSheet(
+            f"color:{palette(colorMode)['text_soft']};font-size:12px;padding:10px 12px;"
+            f"background:{palette(colorMode)['accent_soft']};border-radius:10px;"
+        )
         layout.addWidget(intro)
 
         # Name
         name_label = QLabel("预设名称")
-        name_label.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;")
+        name_label.setStyleSheet(f"color:{palette(colorMode)['text']};font-weight:650;")
         self.name_input = QLineEdit()
-        self.name_input.setStyleSheet(f"""
-            QLineEdit {{
-                padding: 8px;
-                border: 1px solid {'#777' if colorMode == 'dark' else '#ccc'};
-                border-radius: 8px;
-                background-color: {'#333' if colorMode == 'dark' else 'white'};
-                color: {'#fff' if colorMode == 'dark' else '#000'};
-            }}
-        """)
         if "name" in self.button_data:
             self.name_input.setText(self.button_data["name"])
         layout.addWidget(name_label)
@@ -208,7 +212,7 @@ class ButtonEditDialog(QDialog):
 
         icon_label = QLabel("预设图标")
         icon_label.setStyleSheet(
-            f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;"
+            f"color:{palette(colorMode)['text']};font-weight:650;"
         )
         layout.addWidget(icon_label)
         self.icon_picker = PresetIconPicker(
@@ -218,17 +222,9 @@ class ButtonEditDialog(QDialog):
         
         # Instruction (changed to a multiline QPlainTextEdit)
         instruction_label = QLabel("希望 AI 如何处理所选文本？")
-        instruction_label.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;")
+        instruction_label.setStyleSheet(f"color:{palette(colorMode)['text']};font-weight:650;")
         self.instruction_input = QPlainTextEdit()
-        self.instruction_input.setStyleSheet(f"""
-            QPlainTextEdit {{
-                padding: 8px;
-                border: 1px solid {'#777' if colorMode == 'dark' else '#ccc'};
-                border-radius: 8px;
-                background-color: {'#333' if colorMode == 'dark' else 'white'};
-                color: {'#fff' if colorMode == 'dark' else '#000'};
-            }}
-        """)
+        self.instruction_input.setStyleSheet(editor_style(colorMode))
         self.instruction_input.setPlainText(self.button_data.get("instruction", ""))
         self.instruction_input.setMinimumHeight(100)
         self.instruction_input.setPlaceholderText("例如：翻译为中文；改成更温和的语气；提取待办事项；解释并修复这段代码。")
@@ -237,14 +233,14 @@ class ButtonEditDialog(QDialog):
         
         # open_in_window
         display_label = QLabel("结果显示方式")
-        display_label.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;")
+        display_label.setStyleSheet(f"color:{palette(colorMode)['text']};font-weight:650;")
         layout.addWidget(display_label)
         
         radio_layout = QHBoxLayout()
         self.replace_radio = QRadioButton("直接替换所选文本")
         self.window_radio = QRadioButton("在结果窗口中显示（支持追问）")
         for r in (self.replace_radio, self.window_radio):
-            r.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'};")
+            r.setStyleSheet(f"color:{palette(colorMode)['text_soft']};")
         
         self.replace_radio.setChecked(not self.button_data.get("open_in_window", False))
         self.window_radio.setChecked(self.button_data.get("open_in_window", False))
@@ -258,26 +254,17 @@ class ButtonEditDialog(QDialog):
         # options.json under a "hotkey" key; absent = no hotkey, which is
         # how every existing/legacy button starts.
         hotkey_label = QLabel("独立快捷键（可选）")
-        hotkey_label.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;")
+        hotkey_label.setStyleSheet(f"color:{palette(colorMode)['text']};font-weight:650;")
         layout.addWidget(hotkey_label)
 
         self.hotkey_input = ShortcutRecorder()
-        self.hotkey_input.setStyleSheet(f"""
-            QLineEdit {{
-                padding: 8px;
-                border: 1px solid {'#777' if colorMode == 'dark' else '#ccc'};
-                border-radius: 8px;
-                background-color: {'#333' if colorMode == 'dark' else 'white'};
-                color: {'#fff' if colorMode == 'dark' else '#000'};
-            }}
-        """)
         self.hotkey_input.setPlaceholderText("点击后直接按下组合键")
         self.hotkey_input.setText(self.button_data.get("hotkey", ""))
         layout.addWidget(self.hotkey_input)
 
         hotkey_hint = QLabel("点击输入框后直接按下组合键即可录入；Backspace/Delete 清除，Esc 取消。设置后可在任意位置直接运行此预设。")
         hotkey_hint.setStyleSheet(
-            f"color: {'#bbb' if colorMode == 'dark' else '#555'}; font-size: 12px;"
+            f"color:{palette(colorMode)['text_soft']};font-size:12px;"
         )
         hotkey_hint.setWordWrap(True)
         layout.addWidget(hotkey_hint)
@@ -286,8 +273,9 @@ class ButtonEditDialog(QDialog):
         btn_layout = QHBoxLayout()
         ok_button = QPushButton("保存")
         cancel_button = QPushButton("取消")
-        cancel_button.setStyleSheet("QPushButton { background: #f2f3f7; color: #45495a; border: none; border-radius: 9px; padding: 9px 18px; }")
-        ok_button.setStyleSheet("QPushButton { background: #5967e8; color: white; border: none; border-radius: 9px; padding: 9px 22px; font-weight: 600; } QPushButton:hover { background: #4d5ad2; }")
+        cancel_button.setStyleSheet(button_style(colorMode))
+        ok_button.setStyleSheet(button_style(colorMode, primary=True))
+        install_button_motion(ok_button, colorMode, strong=True)
         btn_layout.addStretch()
         btn_layout.addWidget(cancel_button)
         btn_layout.addWidget(ok_button)
@@ -296,11 +284,8 @@ class ButtonEditDialog(QDialog):
         ok_button.clicked.connect(self.accept)
         cancel_button.clicked.connect(self.reject)
         
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {'#222' if colorMode == 'dark' else '#fbfbfd'};
-                border-radius: 14px;
-            }}
+        self.setStyleSheet(global_stylesheet(colorMode) + f"""
+            QDialog {{ background-color:{palette(colorMode)['canvas']};border-radius:16px; }}
         """)
 
     def get_button_data(self):
@@ -343,31 +328,32 @@ class DraggableButton(QtWidgets.QPushButton):
         self.shortcut_badge.setStyleSheet(self.badge_style())
         self.shortcut_badge.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
 
-        self.setMinimumWidth(348)
-        self.setFixedHeight(46)
+        self.setMinimumWidth(360)
+        self.setFixedHeight(45)
         self.setIconSize(QtCore.QSize(19, 19))
+
+        p = palette(colorMode)
 
         self.base_style = f"""
             QPushButton {{
-                background-color: transparent;
-                border: none;
-                border-left: 3px solid transparent;
-                border-bottom: 1px solid {'rgba(255,255,255,18)' if colorMode == 'dark' else '#e8eaf1'};
-                border-radius: 0;
-                padding: 8px 42px 8px 10px;
+                background-color: {'rgba(255,255,255,5)' if colorMode == 'dark' else 'rgba(255,255,255,92)'};
+                border: 1px solid transparent;
+                border-radius: 11px;
+                padding: 7px 42px 7px 12px;
                 font-family: "Microsoft YaHei UI", "Segoe UI Variable";
                 font-size: 14px;
                 text-align: left;
-                color: {"#f4f6ff" if colorMode=="dark" else "#202638"};
+                color: {p['text']};
             }}
             QPushButton[hover="true"] {{
-                background-color: {"rgba(82, 94, 145, 95)" if colorMode=="dark" else "rgba(240, 243, 255, 210)"};
+                background-color: {p['surface_alt']};
+                border-color: {p['border']};
             }}
             QPushButton[selected="true"] {{
-                background-color: {"rgba(83, 99, 187, 118)" if colorMode=="dark" else "rgba(235, 239, 255, 235)"};
-                border-left: 3px solid #6675ee;
-                color: {"#ffffff" if colorMode=="dark" else "#26358d"};
-                font-weight: 600;
+                background-color: {p['accent_soft']};
+                border: 1px solid {p['accent']};
+                color: {p['accent_text']};
+                font-weight: 650;
             }}
         """
         self.setStyleSheet(self.base_style)
@@ -375,10 +361,9 @@ class DraggableButton(QtWidgets.QPushButton):
 
     @staticmethod
     def badge_style(selected=False):
-        border = "#7482ef" if selected else ("#555d72" if colorMode == "dark" else "#d9dce6")
-        text = "#7f8cff" if selected and colorMode == "dark" else (
-            "#4d5fd1" if selected else ("#dfe2f3" if colorMode == "dark" else "#697084")
-        )
+        p = palette(colorMode)
+        border = p['accent'] if selected else p['border_strong']
+        text = p['accent_text'] if selected else p['muted']
         return f"""
             QLabel {{
                 min-width: 23px;
@@ -386,8 +371,8 @@ class DraggableButton(QtWidgets.QPushButton):
                 min-height: 23px;
                 max-height: 23px;
                 border: 1px solid {border};
-                border-radius: 6px;
-                background: {'rgba(255,255,255,16)' if colorMode == 'dark' else 'rgba(255,255,255,205)'};
+                border-radius: 7px;
+                background: {p['surface']};
                 color: {text};
                 font-size: 12px;
                 font-weight: {600 if selected else 500};
@@ -491,17 +476,48 @@ class ToggleSwitch(QtWidgets.QAbstractButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFixedSize(44, 24)
+        self._knob_position = 0.0
+        self._toggle_animation = QtCore.QPropertyAnimation(
+            self, b"knobPosition", self
+        )
+        self._toggle_animation.setDuration(180)
+        self._toggle_animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+        self.toggled.connect(self._animate_toggle)
+
+    def _get_knob_position(self):
+        return self._knob_position
+
+    def _set_knob_position(self, value):
+        self._knob_position = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    knobPosition = QtCore.Property(
+        float, _get_knob_position, _set_knob_position
+    )
+
+    def _animate_toggle(self, checked):
+        self._toggle_animation.stop()
+        if not animations_enabled():
+            self._set_knob_position(1.0 if checked else 0.0)
+            return
+        self._toggle_animation.setStartValue(self._knob_position)
+        self._toggle_animation.setEndValue(1.0 if checked else 0.0)
+        self._toggle_animation.start()
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         track = QtCore.QRectF(0, 0, self.width(), self.height())
-        if self.isChecked():
-            track_color = QtGui.QColor("#5967e8")
-            knob_x = self.width() - 21
-        else:
-            track_color = QtGui.QColor("#555b6e" if colorMode == "dark" else "#cfd3df")
-            knob_x = 3
+        p = palette(colorMode)
+        off_color = QtGui.QColor("#555b6e" if colorMode == "dark" else "#cfd3df")
+        on_color = QtGui.QColor(p['accent'])
+        position = self._knob_position
+        track_color = QtGui.QColor(
+            round(off_color.red() + (on_color.red() - off_color.red()) * position),
+            round(off_color.green() + (on_color.green() - off_color.green()) * position),
+            round(off_color.blue() + (on_color.blue() - off_color.blue()) * position),
+        )
+        knob_x = 3 + (self.width() - 24) * position
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
         painter.setBrush(track_color)
         painter.drawRoundedRect(track, 12, 12)
@@ -530,7 +546,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.preset_share_surface = None
         self.last_action_label = None
         self.remember_checkbox = None
+        self.send_button = None
         self.selected_index = 0
+        self._content_revealed = False
 
         self.button_widgets = []
 
@@ -542,8 +560,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("写作工具")
-        self.setFixedWidth(404)
+        self.setFixedWidth(420)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.setStyleSheet(global_stylesheet(colorMode))
+        self.motion = MotionController(self)
 
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -552,14 +572,14 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self,
             self.app.config.get('theme', 'plain'),
             is_popup=True,
-            border_radius=20,
+            border_radius=24,
             custom_background_path=self.app.config.get('custom_background_path', ''),
         )
         main_layout.addWidget(self.background)
 
         content_layout = QtWidgets.QVBoxLayout(self.background)
-        content_layout.setContentsMargins(22, 18, 22, 16)
-        content_layout.setSpacing(12)
+        content_layout.setContentsMargins(22, 20, 22, 17)
+        content_layout.setSpacing(11)
 
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
@@ -578,15 +598,42 @@ class CustomPopupWindow(QtWidgets.QWidget):
             ))
         top_bar.addWidget(brand_icon)
 
+        brand_copy = QVBoxLayout()
+        brand_copy.setContentsMargins(0, 0, 0, 0)
+        brand_copy.setSpacing(0)
         title_label = QLabel("写作工具")
         title_label.setStyleSheet(f"""
-            color: {'#f7f8ff' if colorMode == 'dark' else '#242632'};
+            color: {palette(colorMode)['text']};
             font-family: "Microsoft YaHei UI", "Segoe UI Variable";
-            font-size: 21px;
+            font-size: 20px;
             font-weight: 650;
         """)
-        top_bar.addWidget(title_label)
+        brand_subtitle = QLabel("快速处理所选内容")
+        brand_subtitle.setStyleSheet(
+            f"color:{palette(colorMode)['muted']};font-size:10px;letter-spacing:.4px;"
+        )
+        brand_copy.addWidget(title_label)
+        brand_copy.addWidget(brand_subtitle)
+        top_bar.addLayout(brand_copy)
         top_bar.addStretch()
+
+        shortcut_chip = QLabel(
+            str(self.app.config.get("shortcut", "ctrl+space"))
+            .replace("+", "  ")
+            .title()
+        )
+        shortcut_chip.setAlignment(Qt.AlignCenter)
+        shortcut_chip.setStyleSheet(f"""
+            QLabel {{
+                min-height: 24px; padding: 0 9px;
+                border: 1px solid {palette(colorMode)['border']};
+                border-radius: 8px;
+                background: {palette(colorMode)['surface_alt']};
+                color: {palette(colorMode)['muted']};
+                font-size: 10px; font-weight: 600;
+            }}
+        """)
+        top_bar.addWidget(shortcut_chip)
 
         self.utility_style = f"""
             QPushButton {{
@@ -684,19 +731,21 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.custom_input.setStyleSheet(f"""
             QLineEdit {{
                 padding: 9px 13px;
-                border: 1px solid {'rgba(255,255,255,35)' if colorMode == 'dark' else 'rgba(66,76,110,35)'};
-                border-radius: 12px;
-                background: {'rgba(31,35,46,225)' if colorMode == 'dark' else 'rgba(255,255,255,238)'};
-                color: {'#f7f8ff' if colorMode == 'dark' else '#242632'};
+                border: 1px solid {palette(colorMode)['border_strong']};
+                border-radius: 13px;
+                background: {palette(colorMode)['surface']};
+                color: {palette(colorMode)['text']};
                 font-family: "Microsoft YaHei UI", "Segoe UI Variable";
                 font-size: 14px;
             }}
-            QLineEdit:focus {{ border: 1px solid #7f8cff; }}
+            QLineEdit:focus {{ border: 1px solid {palette(colorMode)['accent']}; }}
         """)
+        install_focus_glow(self.custom_input, colorMode)
         self.custom_input.returnPressed.connect(self.on_custom_change)
         input_layout.addWidget(self.custom_input)
 
         send_btn = QPushButton()
+        self.send_button = send_btn
         send_icon = os.path.join(
             os.path.dirname(sys.argv[0]), 'icons',
             'send' + ('_dark' if colorMode == 'dark' else '_light') + '.png',
@@ -707,10 +756,11 @@ class CustomPopupWindow(QtWidgets.QWidget):
         send_btn.setFixedSize(46, 46)
         send_btn.setToolTip("执行自定义修改")
         send_btn.setStyleSheet("""
-            QPushButton { background: #5b69e9; border: none; border-radius: 12px; }
-            QPushButton:hover { background: #4f5edc; }
-            QPushButton:pressed { background: #4452c7; }
+            QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #695CF6,stop:1 #7D72FA); border: none; border-radius: 13px; }
+            QPushButton:hover { background: #584BE5; }
+            QPushButton:pressed { background: #493DCB; }
         """)
+        install_button_motion(send_btn, colorMode, strong=True)
         send_btn.clicked.connect(self.on_custom_change)
         input_layout.addWidget(send_btn)
         content_layout.addWidget(self.input_area)
@@ -718,7 +768,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.actions_container = QWidget()
         self.actions_layout = QtWidgets.QVBoxLayout(self.actions_container)
         self.actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.actions_layout.setSpacing(0)
+        self.actions_layout.setSpacing(4)
         content_layout.addWidget(self.actions_container)
 
         self.build_buttons_list()
@@ -758,7 +808,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             QWidget#rememberSurface {{
                 background: {'rgba(255,255,255,12)' if colorMode == 'dark' else 'rgba(245,247,252,210)'};
                 border: 1px solid {'rgba(255,255,255,18)' if colorMode == 'dark' else '#e7e9f0'};
-                border-radius: 10px;
+                border-radius: 13px;
             }}
         """)
         remember_surface_layout = QVBoxLayout(remember_surface)
@@ -852,7 +902,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 widget.deleteLater()
 
         for index, button in enumerate(self.button_widgets):
-            button.setText(f"{index + 1}    {button.display_name}")
+            button.setText(button.display_name)
             button.shortcut_badge.setText(str(index + 1))
             self.actions_layout.addWidget(button)
 
@@ -877,6 +927,12 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.actions_layout.addWidget(add_btn)
 
         self.set_selected_index(min(self.selected_index, max(0, len(self.button_widgets) - 1)))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._content_revealed:
+            self._content_revealed = True
+            self.motion.stagger(self.button_widgets, interval=22, duration=145)
 
     def add_edit_delete_icons(self, btn):
         """Place edit actions in a dedicated right-side rail."""

@@ -8,6 +8,15 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import QScrollArea
 
 from ui.UIUtils import UIUtils, colorMode
+from ui.VisualSystem import (
+    ActivityIndicator,
+    button_style,
+    card_style,
+    editor_style,
+    install_button_motion,
+    install_focus_glow,
+    palette,
+)
 
 _ = lambda x: x
 
@@ -36,18 +45,38 @@ class MarkdownTextBrowser(QtWidgets.QTextBrowser):
         
     def _apply_zoom(self):
         new_size = int(self.base_font_size * self.zoom_factor)
+        p = palette(colorMode)
+        self.document().setDefaultStyleSheet(f"""
+            body {{ color: {p['text']}; font-family: 'Microsoft YaHei UI', 'Segoe UI';
+                font-size: {new_size}px; line-height: 1.5; }}
+            h1, h2, h3, h4 {{ color: {p['text']}; margin-top: 14px; margin-bottom: 8px; }}
+            p {{ margin-top: 4px; margin-bottom: 9px; }}
+            ul, ol {{ margin-top: 5px; margin-bottom: 9px; }}
+            blockquote {{ color: {p['text_soft']}; border-left: 3px solid {p['accent']};
+                margin-left: 4px; padding-left: 12px; }}
+            code {{ color: {p['accent_text']}; background-color: {p['accent_soft']};
+                padding: 2px 4px; }}
+            pre {{ color: {p['text']}; background-color: {p['surface_soft']};
+                border: 1px solid {p['border']}; padding: 10px; }}
+            table {{ border-collapse: collapse; margin-top: 10px; margin-bottom: 10px; }}
+            th {{ color: {p['text']}; background-color: {p['surface_soft']};
+                border: 1px solid {p['border_strong']}; padding: 7px 10px; }}
+            td {{ color: {p['text_soft']}; border: 1px solid {p['border_strong']};
+                padding: 7px 10px; }}
+            a {{ color: {p['accent_text']}; text-decoration: none; }}
+        """)
         
         # Updated stylesheet with table styling
         self.setStyleSheet(f"""
             QTextBrowser {{
-                background-color: {('transparent' if self.is_user_message else '#333' if colorMode == 'dark' else 'white')};
-                color: {'#ffffff' if colorMode == 'dark' else '#000000'};
-                border: {('none' if self.is_user_message else '1px solid ' + ('#555' if colorMode == 'dark' else '#ccc'))};
-                border-radius: 8px;
-                padding: 8px;
+                background-color: {(p['accent_soft'] if self.is_user_message else p['surface'])};
+                color: {(p['accent_text'] if self.is_user_message else p['text'])};
+                border: 1px solid {(p['accent'] if self.is_user_message else p['border'])};
+                border-radius: 14px;
+                padding: 13px 15px;
                 margin: 0px;
                 font-size: {new_size}px;
-                line-height: 1.3;
+                line-height: 1.45;
                 width: 100%;
             }}
 
@@ -59,24 +88,28 @@ class MarkdownTextBrowser(QtWidgets.QTextBrowser):
             }}
             
             th, td {{
-                border: 1px solid {'#555' if colorMode == 'dark' else '#ccc'};
+                border: 1px solid {p['border_strong']};
                 padding: 8px;
                 text-align: left;
             }}
             
             th {{
-                background-color: {'#444' if colorMode == 'dark' else '#f5f5f5'};
+                background-color: {p['surface_soft']};
                 font-weight: bold;
             }}
             
             tr:nth-child(even) {{
-                background-color: {'#3a3a3a' if colorMode == 'dark' else '#f9f9f9'};
+                background-color: {p['surface_alt']};
             }}
             
             tr:hover {{
-                background-color: {'#484848' if colorMode == 'dark' else '#f0f0f0'};
+                background-color: {p['accent_soft']};
             }}
         """)
+
+    def set_markdown_text(self, text):
+        self.setHtml(markdown2.markdown(str(text or ""), extras=['tables', 'strike']))
+        self._update_size()
         
     def _update_size(self):
         # Calculate correct document width
@@ -177,33 +210,33 @@ class ChatContentScrollArea(QScrollArea):
         
         # Main layout with improved spacing
         self.layout = QtWidgets.QVBoxLayout(self.content_widget)
-        self.layout.setSpacing(8)  # Reduced spacing between messages
-        self.layout.setContentsMargins(15, 15, 15, 15)  # Adjusted margins
+        self.layout.setSpacing(12)
+        self.layout.setContentsMargins(4, 10, 4, 10)
         self.layout.addStretch()
         
-        # Enhanced scroll area styling
-        self.setStyleSheet("""
-            QScrollArea {
+        p = palette(colorMode)
+        self.setStyleSheet(f"""
+            QScrollArea {{
                 background-color: transparent;
                 border: none;
-            }
-            QScrollArea > QWidget > QWidget {
+            }}
+            QScrollArea > QWidget > QWidget {{
                 background-color: transparent;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 background-color: transparent;
                 width: 12px;
                 margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: rgba(128, 128, 128, 0.5);
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {p['border_strong']};
                 min-height: 20px;
                 border-radius: 6px;
                 margin: 2px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
-            }
+            }}
         """)
 
     def add_message(self, text, is_user=False):
@@ -212,6 +245,7 @@ class ChatContentScrollArea(QScrollArea):
         
         # Create message container with improved width
         msg_container = QtWidgets.QWidget()
+        msg_container.setObjectName("messageContainer")
         msg_container.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Minimum
@@ -226,8 +260,7 @@ class ChatContentScrollArea(QScrollArea):
         text_display = MarkdownTextBrowser(is_user_message=is_user)
         
         # Enable tables extension in markdown2
-        html = markdown2.markdown(text, extras=['tables', 'strike'])
-        text_display.setHtml(html)
+        text_display.set_markdown_text(text)
         
         # Calculate proper text display size using full width
         text_display.document().setTextWidth(self.width() - 20)
@@ -238,6 +271,12 @@ class ChatContentScrollArea(QScrollArea):
         
         self.layout.addWidget(msg_container)
         self.layout.addStretch()
+
+        owner = self.parent()
+        while owner and not isinstance(owner, ResponseWindow):
+            owner = owner.parent()
+        if owner is not None:
+            owner.motion.reveal_widget(msg_container, duration=170)
         
         QtCore.QTimer.singleShot(50, self.post_message_updates)
         
@@ -307,9 +346,17 @@ class ResponseWindow(QtWidgets.QWidget):
         self.input_field = None
         self.loading_label = None
         self.loading_container = None
+        self.loading_indicator = None
         self.chat_area = None
         self.chat_history = []
         self._closed = False
+        self._stream_target = ""
+        self._stream_rendered = ""
+        self._stream_scroll_counter = 0
+        self._stream_preview_display = None
+        self._stream_timer = QtCore.QTimer(self)
+        self._stream_timer.setInterval(18)
+        self._stream_timer.timeout.connect(self._type_stream_character)
 
         # Setup thinking animation with full range of dots
         self.thinking_timer = QtCore.QTimer(self)
@@ -339,23 +386,33 @@ class ResponseWindow(QtWidgets.QWidget):
         # Main layout setup
         UIUtils.setup_window_and_layout(self)
         content_layout = QtWidgets.QVBoxLayout(self.background)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        content_layout.setSpacing(10)
+        content_layout.setContentsMargins(28, 24, 28, 22)
+        content_layout.setSpacing(13)
 
         # Top bar with zoom controls
         top_bar = QtWidgets.QHBoxLayout()
         
+        title_copy = QtWidgets.QVBoxLayout()
+        title_copy.setSpacing(0)
+        eyebrow = QtWidgets.QLabel("WRITING  RESULT")
+        eyebrow.setStyleSheet(
+            f"color:{palette(colorMode)['accent']};font-size:9px;font-weight:700;letter-spacing:1.4px;"
+        )
         title_label = QtWidgets.QLabel(self.option)
-        title_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-        top_bar.addWidget(title_label)
+        title_label.setStyleSheet(
+            f"font-size:21px;font-weight:700;color:{palette(colorMode)['text']};"
+        )
+        title_copy.addWidget(eyebrow)
+        title_copy.addWidget(title_label)
+        top_bar.addLayout(title_copy)
         
         top_bar.addStretch()
 
         # Zoom label with matched size
-        zoom_label = QtWidgets.QLabel("缩放：")
+        zoom_label = QtWidgets.QLabel("阅读缩放")
         zoom_label.setStyleSheet(f"""
-            color: {'#aaaaaa' if colorMode == 'dark' else '#666666'};
-            font-size: 14px;
+            color: {palette(colorMode)['muted']};
+            font-size: 11px;
             margin-right: 5px;
         """)
         top_bar.addWidget(zoom_label)
@@ -378,14 +435,22 @@ class ResponseWindow(QtWidgets.QWidget):
             
         content_layout.addLayout(top_bar)
 
-        # Copy controls with matching text size
+        divider = QtWidgets.QFrame()
+        divider.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        divider.setStyleSheet(
+            f"color:{palette(colorMode)['border']};background:{palette(colorMode)['border']};max-height:1px;"
+        )
+        content_layout.addWidget(divider)
+
         copy_bar = QtWidgets.QHBoxLayout()
-        copy_hint = QtWidgets.QLabel(_("Select to copy with formatting"))
-        copy_hint.setStyleSheet(f"color: {'#aaaaaa' if colorMode == 'dark' else '#666666'}; font-size: 14px;")
+        copy_hint = QtWidgets.QLabel("结果支持 Markdown · 选中文字可保留格式复制")
+        copy_hint.setStyleSheet(
+            f"color:{palette(colorMode)['muted']};font-size:11px;"
+        )
         copy_bar.addWidget(copy_hint)
         copy_bar.addStretch()
         
-        copy_md_btn = QtWidgets.QPushButton(_("Copy as Markdown"))
+        copy_md_btn = QtWidgets.QPushButton("复制 Markdown")
         copy_md_btn.setStyleSheet(self.get_button_style())
         copy_md_btn.clicked.connect(self.copy_first_response)  # Updated to only copy first response
         copy_bar.addWidget(copy_md_btn)
@@ -399,17 +464,23 @@ class ResponseWindow(QtWidgets.QWidget):
         self.loading_label = QtWidgets.QLabel(_("Thinking"))
         self.loading_label.setStyleSheet(f"""
             QLabel {{
-                color: {'#ffffff' if colorMode == 'dark' else '#333333'};
-                font-size: 18px;
-                padding: 20px;
+                color: {palette(colorMode)['text_soft']};
+                font-size: 13px;
+                padding: 4px;
             }}
         """)
         self.loading_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         
         loading_inner_container = QtWidgets.QWidget()
-        loading_inner_container.setFixedWidth(180)
+        loading_inner_container.setObjectName("loadingSurface")
+        loading_inner_container.setStyleSheet(card_style(colorMode, "loadingSurface"))
+        loading_inner_container.setFixedWidth(210)
         loading_inner_layout = QtWidgets.QHBoxLayout(loading_inner_container)
         loading_inner_layout.setContentsMargins(0, 0, 0, 0)
+        loading_inner_layout.setContentsMargins(14, 10, 14, 10)
+        self.loading_indicator = ActivityIndicator(colorMode)
+        self.loading_indicator.set_state("busy")
+        loading_inner_layout.addWidget(self.loading_indicator)
         loading_inner_layout.addWidget(self.loading_label)
         
         loading_layout.addStretch()
@@ -430,34 +501,17 @@ class ResponseWindow(QtWidgets.QWidget):
         bottom_bar = QtWidgets.QHBoxLayout()
         
         self.input_field = QtWidgets.QLineEdit()
-        self.input_field.setPlaceholderText(_("Ask a follow-up question")+'...')
-        self.input_field.setStyleSheet(f"""
-            QLineEdit {{
-                padding: 8px;
-                border: 1px solid {'#777' if colorMode == 'dark' else '#ccc'};
-                border-radius: 8px;
-                background-color: {'#333' if colorMode == 'dark' else 'white'};
-                color: {'#ffffff' if colorMode == 'dark' else '#000000'};
-                font-size: 14px;
-            }}
-        """)
+        self.input_field.setPlaceholderText("继续追问…")
+        self.input_field.setMinimumHeight(44)
+        install_focus_glow(self.input_field, colorMode)
         self.input_field.returnPressed.connect(self.send_message)
         bottom_bar.addWidget(self.input_field)
         
         send_button = QtWidgets.QPushButton()
         send_button.setIcon(QtGui.QIcon(os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'send' + ('_dark' if colorMode == 'dark' else '_light') + '.png')))
-        send_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {'#2e7d32' if colorMode == 'dark' else '#4CAF50'};
-                border: none;
-                border-radius: 8px;
-                padding: 5px;
-            }}
-            QPushButton:hover {{
-                background-color: {'#1b5e20' if colorMode == 'dark' else '#45a049'};
-            }}
-        """)
-        send_button.setFixedSize(self.input_field.sizeHint().height(), self.input_field.sizeHint().height())
+        send_button.setStyleSheet(button_style(colorMode, primary=True))
+        send_button.setFixedSize(44, 44)
+        install_button_motion(send_button, colorMode, strong=True)
         send_button.clicked.connect(self.send_message)
         bottom_bar.addWidget(send_button)
         
@@ -486,21 +540,16 @@ class ResponseWindow(QtWidgets.QWidget):
         response_text = self.get_first_response_text()
         if response_text:
             QtWidgets.QApplication.clipboard().setText(response_text)
+            self.loading_label.setText("已复制 Markdown")
+            self.loading_label.show()
+            if self.loading_indicator is not None:
+                self.loading_indicator.set_state("success")
+                self.loading_indicator.show()
+            self.loading_container.show()
+            QtCore.QTimer.singleShot(1100, self.loading_container.hide)
 
     def get_button_style(self):
-        return f"""
-            QPushButton {{
-                background-color: {'#444' if colorMode == 'dark' else '#f0f0f0'};
-                color: {'#ffffff' if colorMode == 'dark' else '#000000'};
-                border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
-                border-radius: 5px;
-                padding: 8px;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {'#555' if colorMode == 'dark' else '#e0e0e0'};
-            }}
-        """
+        return button_style(colorMode, compact=True)
 
     def update_thinking_dots(self):
         """Update the thinking animation dots with proper cycling"""
@@ -521,18 +570,22 @@ class ResponseWindow(QtWidgets.QWidget):
             self.loading_label.setVisible(True)
             self.loading_container.setVisible(True)
         else:
-            self.input_field.setPlaceholderText(_("Thinking"))
+            self.input_field.setPlaceholderText("正在生成…")
             self.loading_container.setVisible(False)
             
         self.thinking_timer.start()
+        if self.loading_indicator is not None:
+            self.loading_indicator.set_state("busy")
 
     def stop_thinking_animation(self):
         """Stop the thinking animation"""
         self.thinking_timer.stop()
         self.loading_container.hide()
         self.loading_label.hide()
-        self.input_field.setPlaceholderText(_("Ask a follow-up question"))
+        self.input_field.setPlaceholderText("继续追问…")
         self.input_field.setEnabled(True)
+        if self.loading_indicator is not None:
+            self.loading_indicator.set_state("success")
         
         # Force layout update
         if self.layout():
@@ -626,7 +679,15 @@ class ResponseWindow(QtWidgets.QWidget):
         ]
         
         self.stop_thinking_animation()
-        text_display = self.chat_area.add_message(text)
+        text_display = getattr(self, '_stream_preview_display', None)
+        if text_display is not None:
+            self._stream_timer.stop()
+            self._stream_target = str(text)
+            self._stream_rendered = str(text)
+            text_display.set_markdown_text(text)
+            self._stream_preview_display = None
+        else:
+            text_display = self.chat_area.add_message(text)
         
         # Update zoom state
         if isinstance(self.app.config, dict) and 'response_window_zoom' in self.app.config:
@@ -635,6 +696,38 @@ class ResponseWindow(QtWidgets.QWidget):
         self.current_text_display = text_display
         
         QtCore.QTimer.singleShot(100, self._adjust_window_height)
+
+    @Slot(str)
+    def set_stream_preview(self, text):
+        """Queue a partial response and reveal it one character at a time."""
+        if self._closed or not str(text or "").strip():
+            return
+        self.stop_thinking_animation()
+        self.input_field.setEnabled(False)
+        target = str(text)
+        if not target.startswith(self._stream_rendered):
+            self._stream_rendered = ""
+            if self._stream_preview_display is not None:
+                self._stream_preview_display.clear()
+        self._stream_target = target
+        if self._stream_preview_display is None:
+            self._stream_preview_display = self.chat_area.add_message("")
+        if not self._stream_rendered:
+            self._type_stream_character()
+        if not self._stream_timer.isActive():
+            self._stream_timer.start()
+
+    def _type_stream_character(self):
+        if self._closed or len(self._stream_rendered) >= len(self._stream_target):
+            self._stream_timer.stop()
+            return
+        character = self._stream_target[len(self._stream_rendered)]
+        self._stream_rendered += character
+        self._stream_preview_display.moveCursor(QtGui.QTextCursor.MoveOperation.End)
+        self._stream_preview_display.insertPlainText(character)
+        self._stream_scroll_counter += 1
+        if self._stream_scroll_counter % 3 == 0 or character == "\n":
+            QtCore.QTimer.singleShot(0, self.chat_area.post_message_updates)
         
     @Slot(object)
     def handle_followup_response(self, context):
@@ -698,6 +791,8 @@ class ResponseWindow(QtWidgets.QWidget):
     def closeEvent(self, event):
         """Handle window close event"""
         self._closed = True
+        self._stream_timer.stop()
+        self.thinking_timer.stop()
         # Save zoom factor to main config
         if hasattr(self, 'current_text_display'):
             self.app.config['response_window_zoom'] = self.current_text_display.zoom_factor

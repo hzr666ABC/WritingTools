@@ -15,17 +15,27 @@ import ui.CustomPopupWindow
 import ui.DiagnosticsWindow
 import ui.HistoryWindow
 import ui.OnboardingWindow
+import ui.PromptSettingsWindow
+import ui.PromptWorkbenchWindow
+import ui.PromptLibraryWindow
 import ui.ResponseWindow
 import ui.SafeApplyWindow
 import ui.SettingsWindow
 from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider
 from history_store import HistoryStore
+from ime_state import capture_ime_state, restore_ime_state
+from native_hotkey import WindowsCtrlSpaceHotkey
+from prompt_library import PromptLibraryStore
+from prompt_presets import PromptPresetStore
+from prompt_preferences import PromptPreferenceStore
 from pynput import keyboard as pykeyboard
 
 from hotkey_guard import (
-    hotkey_modifiers_are_physically_active,
+    hotkey_has_extra_modifiers,
+    hotkey_modifiers_match_exactly,
     modifier_is_physically_down,
     send_modified_key,
+    wait_for_hotkey_modifiers_release,
 )
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
@@ -39,6 +49,10 @@ from quick_action_workflow import (
 )
 from request_guard import RequestGenerationGuard
 from secure_storage import protect_secret, redact_text, unprotect_secret
+from sharpinput_workflow import (
+    COMPILER_SYSTEM_INSTRUCTION,
+    JUDGE_SYSTEM_INSTRUCTION,
+)
 from text_application import activate_window, capture_foreground_window
 from ui.i18n import translate
 from update_checker import UpdateChecker
@@ -52,13 +66,14 @@ class _SelectedTextHolder:
     `process_option_thread`. The capture thread sets `text` and signals
     `ready` once done.
     """
-    __slots__ = ("text", "ready", "request_id", "source_window_handle")
+    __slots__ = ("text", "ready", "request_id", "source_window_handle", "ime_state")
 
     def __init__(self):
         self.text = ""
         self.ready = threading.Event()
         self.request_id = 0
         self.source_window_handle = None
+        self.ime_state = None
 
 
 class WritingToolApp(QtWidgets.QApplication):
@@ -66,9 +81,13 @@ class WritingToolApp(QtWidgets.QApplication):
     The main application class for Writing Tools.
     """
     generation_result_signal = Signal(object)
+    generation_progress_signal = Signal(object)
     show_message_signal = Signal(str, str)  # a signal for showing message boxes
     hotkey_triggered_signal = Signal()
+    prompt_hotkey_triggered_signal = Signal()
     followup_response_signal = Signal(object)
+    prompt_response_signal = Signal(object)
+    prompt_progress_signal = Signal(object)
 
 
     def __init__(self, argv):
@@ -76,8 +95,12 @@ class WritingToolApp(QtWidgets.QApplication):
         self.current_response_window = None
         logging.debug('Initializing WritingToolApp')
         self.generation_result_signal.connect(self._handle_generation_result)
+        self.generation_progress_signal.connect(self._handle_generation_progress)
         self.show_message_signal.connect(self.show_message_box)
         self.hotkey_triggered_signal.connect(self.on_hotkey_pressed)
+        self.prompt_hotkey_triggered_signal.connect(self.on_prompt_hotkey_pressed)
+        self.prompt_response_signal.connect(self._handle_prompt_response)
+        self.prompt_progress_signal.connect(self._handle_prompt_progress)
         self.config = None
         self.config_path = None
         self.load_config()
@@ -93,11 +116,23 @@ class WritingToolApp(QtWidgets.QApplication):
             os.path.join(os.path.dirname(sys.argv[0]), 'history.json'),
             max_entries=self.config.get('history_max_entries', 100) if self.config else 100,
         )
+        self.prompt_preference_store = PromptPreferenceStore(
+            os.path.join(os.path.dirname(sys.argv[0]), 'prompt_preferences.json')
+        )
+        self.prompt_preset_store = PromptPresetStore(
+            os.path.join(os.path.dirname(sys.argv[0]), 'prompt_presets.json')
+        )
+        self.prompt_library_store = PromptLibraryStore(
+            os.path.join(os.path.dirname(sys.argv[0]), 'prompt_library.json')
+        )
         self.onboarding_window = None
         self.popup_window = None
         self.tray_icon = None
         self.tray_menu = None
         self.settings_window = None
+        self.prompt_settings_window = None
+        self.prompt_workbench_window = None
+        self.prompt_library_window = None
         self.about_window = None
         self.safe_apply_window = None
         self.history_window = None
@@ -109,6 +144,8 @@ class WritingToolApp(QtWidgets.QApplication):
         self.output_queue = ""
         self.last_replace = 0
         self.hotkey_listener = None
+        self.native_main_hotkey = None
+        self.native_prompt_hotkey = None
         self.paused = False
         self.toggle_action = None
 
@@ -118,10 +155,13 @@ class WritingToolApp(QtWidgets.QApplication):
         # captures across rapid hotkey presses so two captures don't fight
         # over the clipboard at once.
         self.current_text_holder = None
+        self.prompt_capture_holder = None
         self._capture_lock = threading.Lock()
         self._request_guard = RequestGenerationGuard()
+        self._prompt_request_guard = RequestGenerationGuard()
         self._trigger_lock = threading.Lock()
         self.recent_triggers = []
+        self.prompt_recent_triggers = []
         self.TRIGGER_WINDOW = 1.5
         self.MAX_TRIGGERS = 3
 
@@ -134,6 +174,13 @@ class WritingToolApp(QtWidgets.QApplication):
 
         # Setup available AI providers
         self.providers = [GeminiProvider(self), OpenAICompatibleProvider(self), OllamaProvider(self)]
+        self.prompt_providers = [
+            GeminiProvider(self).set_config_namespace("prompt_providers"),
+            OpenAICompatibleProvider(self).set_config_namespace("prompt_providers"),
+            OllamaProvider(self).set_config_namespace("prompt_providers"),
+        ]
+        self.current_prompt_provider = None
+        self.reload_prompt_provider()
 
         if not self.config:
             logging.debug('No config found, showing onboarding')
@@ -149,7 +196,11 @@ class WritingToolApp(QtWidgets.QApplication):
                 logging.warning(f'Provider {provider_name} not found. Using default provider.')
                 self.current_provider = self.providers[0]
 
-            self.current_provider.load_config(self.config.get("providers", {}).get(provider_name, {}))
+            self._load_provider_config_safely(
+                self.current_provider,
+                self.config.get("providers", {}).get(provider_name, {}),
+                context="writing",
+            )
 
             self.create_tray_icon()
             self.register_hotkey()
@@ -217,6 +268,18 @@ class WritingToolApp(QtWidgets.QApplication):
             )
             return throttled
 
+    def check_prompt_trigger_spam(self):
+        """Throttle Prompt activations without affecting the writing shortcut."""
+
+        with self._trigger_lock:
+            self.prompt_recent_triggers, throttled = record_trigger(
+                self.prompt_recent_triggers,
+                time.monotonic(),
+                window_seconds=self.TRIGGER_WINDOW,
+                maximum_triggers=self.MAX_TRIGGERS,
+            )
+            return throttled
+
     def load_config(self):
         """
         Load the configuration file.
@@ -254,12 +317,34 @@ class WritingToolApp(QtWidgets.QApplication):
             'safe_apply_enabled': True,
             'history_enabled': True,
             'history_max_entries': 100,
+            'shortcut': 'ctrl+space',
         }
         changed = False
         for key, value in defaults.items():
             if key not in self.config:
                 self.config[key] = value
                 changed = True
+
+        prompt_defaults = {
+            'shortcut': 'ctrl+shift+p',
+            'provider': 'Gemini (Recommended)',
+            'default_depth': 'auto',
+            'memory_enabled': False,
+            'default_scene': 'smart',
+            'fallback_enabled': True,
+        }
+        prompt_config = self.config.get('prompt_workbench')
+        if not isinstance(prompt_config, dict):
+            prompt_config = {}
+            self.config['prompt_workbench'] = prompt_config
+            changed = True
+        for key, value in prompt_defaults.items():
+            if key not in prompt_config:
+                prompt_config[key] = value
+                changed = True
+        if not isinstance(self.config.get('prompt_providers'), dict):
+            self.config['prompt_providers'] = {}
+            changed = True
 
         # This fork is intentionally Chinese-first, including upgrades from
         # the portable English release.
@@ -273,7 +358,7 @@ class WritingToolApp(QtWidgets.QApplication):
     def _migrate_config(self):
         """
         One-shot config migration. Catches any user up to the current schema
-        (v10) regardless of where they started — v7, v8, or already current —
+        (v14) regardless of where they started — v7, v8, or already current —
         in a single pass without forcing a restart.
 
         Each version is gated on its own `is_config_file_updated_for_v{N}`
@@ -302,8 +387,25 @@ class WritingToolApp(QtWidgets.QApplication):
         v10 (custom build):
           • Migrate every provider API key to Windows DPAPI.
           • Enable safe apply and encrypted history defaults.
+
+        v11 (Prompt Workbench):
+          • Add an independent shortcut and provider namespace.
+          • Do not copy any existing writing-provider credential.
+          • Keep durable Prompt preferences disabled by default.
+
+        v12 (hotkey isolation):
+          • Move the Prompt default away from the Ctrl+Space key family.
+          • Existing Ctrl+Shift+Space defaults become Ctrl+Shift+P.
+
+        v13 (input method safety and generation strategy):
+          • Temporarily moved the main default away from Ctrl+Space.
+          • Add scene, speed-strategy and fallback defaults.
+
+        v14 (restore the original main shortcut):
+          • Restore Ctrl+Space while preserving source-window IME state before
+            and after applying generated text.
         """
-        CURRENT_CONFIG_VERSION = 10
+        CURRENT_CONFIG_VERSION = 14
         # Default for new installs and migrating users.
         NEW_DEFAULT_MODEL = 'gemini-flash-latest'
         # v8 -> v9 model mapping. Every retired preset is bumped to the new
@@ -324,14 +426,19 @@ class WritingToolApp(QtWidgets.QApplication):
         needs_v8 = not self.config.get('is_config_file_updated_for_v8', False)
         needs_v9 = not self.config.get('is_config_file_updated_for_v9', False)
         needs_v10 = not self.config.get('is_config_file_updated_for_v10', False)
+        needs_v11 = not self.config.get('is_config_file_updated_for_v11', False)
+        needs_v12 = not self.config.get('is_config_file_updated_for_v12', False)
+        needs_v13 = not self.config.get('is_config_file_updated_for_v13', False)
+        needs_v14 = not self.config.get('is_config_file_updated_for_v14', False)
 
-        if not needs_v8 and not needs_v9 and not needs_v10:
+        if not any((needs_v8, needs_v9, needs_v10, needs_v11, needs_v12, needs_v13, needs_v14)):
             logging.debug('Config already up-to-date, no migration needed')
             return
 
         logging.info(
             f'Running config migration (needs_v8={needs_v8}, needs_v9={needs_v9}, '
-            f'needs_v10={needs_v10})...'
+            f'needs_v10={needs_v10}, needs_v11={needs_v11}, '
+            f'needs_v12={needs_v12}, needs_v13={needs_v13}, needs_v14={needs_v14})...'
         )
 
         config_changed = False
@@ -392,6 +499,47 @@ class WritingToolApp(QtWidgets.QApplication):
             self.config.setdefault('safe_apply_enabled', True)
             self.config.setdefault('history_enabled', True)
             self.config.setdefault('history_max_entries', 100)
+
+        if needs_v11:
+            prompt_config = self.config.get('prompt_workbench')
+            if not isinstance(prompt_config, dict):
+                prompt_config = {}
+                self.config['prompt_workbench'] = prompt_config
+            prompt_config.setdefault('shortcut', 'ctrl+shift+p')
+            prompt_config.setdefault('provider', 'Gemini (Recommended)')
+            prompt_config.setdefault('default_depth', 'auto')
+            prompt_config.setdefault('memory_enabled', False)
+            # Never copy main-provider credentials into the Prompt profile.
+            if not isinstance(self.config.get('prompt_providers'), dict):
+                self.config['prompt_providers'] = {}
+
+        if needs_v12:
+            prompt_config = self.config.get('prompt_workbench')
+            if not isinstance(prompt_config, dict):
+                prompt_config = {}
+                self.config['prompt_workbench'] = prompt_config
+            if prompt_config.get('shortcut') in (None, '', 'ctrl+shift+space'):
+                prompt_config['shortcut'] = 'ctrl+shift+p'
+
+        if needs_v13:
+            if self.config.get('shortcut') in (None, '', 'ctrl+space'):
+                self.config['shortcut'] = 'ctrl+alt+space'
+            compatible = self.config.get('providers', {}).get(
+                'OpenAI Compatible (For Experts)', {}
+            )
+            if (
+                isinstance(compatible, dict)
+                and 'api.groq.com' in str(compatible.get('api_base', '')).casefold()
+                and compatible.get('api_model') == 'openai/gpt-oss-120b'
+            ):
+                compatible['api_model'] = 'openai/gpt-oss-20b'
+                config_changed = True
+            prompt_config = self.config.setdefault('prompt_workbench', {})
+            prompt_config.setdefault('default_scene', 'smart')
+            prompt_config.setdefault('fallback_enabled', True)
+
+        if needs_v14 and self.config.get('shortcut') in (None, '', 'ctrl+alt+space'):
+            self.config['shortcut'] = 'ctrl+space'
 
         # Stamp every version flag up to current so we never re-run on
         # subsequent startups, even if no fields actually needed changing
@@ -462,8 +610,84 @@ class WritingToolApp(QtWidgets.QApplication):
                     pass
         self.config = config
 
-    def _safe_error_text(self, error):
-        provider = getattr(self, "current_provider", None)
+    def reload_prompt_provider(self):
+        """Load only the explicitly selected Prompt provider profile."""
+
+        if not isinstance(self.config, dict) or not hasattr(self, 'prompt_providers'):
+            self.current_prompt_provider = None
+            return
+        prompt_config = self.config.setdefault('prompt_workbench', {})
+        provider_name = prompt_config.get('provider', 'Gemini (Recommended)')
+        provider = next(
+            (item for item in self.prompt_providers if item.provider_name == provider_name),
+            self.prompt_providers[0],
+        )
+        self.current_prompt_provider = provider
+        stored = self.config.setdefault('prompt_providers', {}).get(
+            provider.provider_name, {}
+        )
+        if not isinstance(stored, dict) or not stored:
+            for setting in provider.settings:
+                setattr(provider, setting.name, setting.default_value)
+                setting.set_value(setting.default_value)
+            provider.client = None
+            return
+        self._load_provider_config_safely(provider, stored, context='Prompt')
+
+    def _load_provider_config_safely(self, provider, stored, *, context):
+        """Initialize one provider without letting a partial config abort startup."""
+
+        try:
+            provider.before_load()
+            provider.load_config(stored if isinstance(stored, dict) else {})
+            return True
+        except Exception as error:
+            logging.error(
+                'Unable to initialize %s provider: %s',
+                context,
+                self._safe_error_text(error, provider=provider),
+            )
+            provider.client = None
+            return False
+
+    def prompt_provider_is_configured(self):
+        """Check required Prompt profile values without falling back to main AI."""
+
+        provider = getattr(self, 'current_prompt_provider', None)
+        if provider is None or not isinstance(self.config, dict):
+            return False
+        values = self.config.get('prompt_providers', {}).get(provider.provider_name, {})
+        if not isinstance(values, dict):
+            return False
+        if isinstance(provider, GeminiProvider):
+            try:
+                key = unprotect_secret(values.get('api_key', ''))
+            except Exception:
+                return False
+            return bool(key and values.get('model_name'))
+        if isinstance(provider, OpenAICompatibleProvider):
+            try:
+                key = unprotect_secret(values.get('api_key', ''))
+            except Exception:
+                return False
+            return bool(key and values.get('api_base') and values.get('api_model'))
+        return bool(values.get('api_base') and values.get('api_model'))
+
+    def prompt_provider_display(self):
+        provider = getattr(self, 'current_prompt_provider', None)
+        if provider is None:
+            return 'Prompt AI 未配置'
+        values = self.config.get('prompt_providers', {}).get(provider.provider_name, {})
+        model = values.get('model_name') or values.get('api_model') or '未配置模型'
+        names = {
+            'Gemini (Recommended)': 'Gemini',
+            'OpenAI Compatible (For Experts)': 'OpenAI 兼容',
+            'Ollama (For Experts)': 'Ollama',
+        }
+        return f"{names.get(provider.provider_name, provider.provider_name)} · {model}"
+
+    def _safe_error_text(self, error, provider=None):
+        provider = provider or getattr(self, "current_provider", None)
         secret = getattr(provider, "api_key", "") if provider else ""
         return redact_text(str(error), [secret])
 
@@ -479,8 +703,8 @@ class WritingToolApp(QtWidgets.QApplication):
     @staticmethod
     def _to_pynput_hotkey(hotkey_str):
         """
-        Convert a user-facing hotkey string ('ctrl+j', 'ctrl+alt+space') to
-        pynput's `<ctrl>+j` / `<ctrl>+<alt>+<space>` format. Single-char keys
+        Convert a user-facing hotkey string ('ctrl+j', 'ctrl+space') to
+        pynput's `<ctrl>+j` / `<ctrl>+<space>` format. Single-char keys
         stay as-is; multi-char keys (modifiers, named keys) get wrapped in <>.
         """
         return '+'.join(
@@ -504,6 +728,14 @@ class WritingToolApp(QtWidgets.QApplication):
             if self.hotkey_listener is not None:
                 self.hotkey_listener.stop()
                 self.hotkey_listener = None
+            native_listener = getattr(self, 'native_main_hotkey', None)
+            if native_listener is not None:
+                native_listener.stop()
+                self.native_main_hotkey = None
+            native_prompt_listener = getattr(self, 'native_prompt_hotkey', None)
+            if native_prompt_listener is not None:
+                native_prompt_listener.stop()
+                self.native_prompt_hotkey = None
 
             hotkey_map = {}
 
@@ -518,7 +750,7 @@ class WritingToolApp(QtWidgets.QApplication):
                 def on_global_activate():
                     if self.paused:
                         return
-                    if not hotkey_modifiers_are_physically_active(orig_shortcut):
+                    if not hotkey_modifiers_match_exactly(orig_shortcut):
                         logging.warning(
                             'Ignored a global hotkey activation with stale modifier state'
                         )
@@ -526,10 +758,132 @@ class WritingToolApp(QtWidgets.QApplication):
                     logging.debug('triggered global hotkey')
                     self.hotkey_triggered_signal.emit()
 
-                hotkey_map[global_parsed] = on_global_activate
-                logging.debug(f'Registered global hotkey: {global_parsed}')
+                native_registered = False
+                if os.name == 'nt' and orig_shortcut.strip().casefold() == 'ctrl+space':
+                    def on_native_activate():
+                        if self.paused:
+                            return
+                        if hotkey_has_extra_modifiers(orig_shortcut):
+                            logging.warning(
+                                'Ignored native main hotkey with extra modifier state'
+                            )
+                            return
+
+                        def emit_after_release():
+                            if wait_for_hotkey_modifiers_release(orig_shortcut):
+                                self.hotkey_triggered_signal.emit()
+                            else:
+                                logging.warning(
+                                    'Ignored main activation because modifiers stayed held'
+                                )
+
+                        threading.Thread(target=emit_after_release, daemon=True).start()
+
+                    self.native_main_hotkey = WindowsCtrlSpaceHotkey(on_native_activate)
+                    native_registered = self.native_main_hotkey.start()
+                    if native_registered:
+                        logging.debug(
+                            'Registered native Ctrl+Space; the chord will not reach the IME'
+                        )
+                    else:
+                        logging.warning(
+                            'Native Ctrl+Space registration failed (%s); using compatibility listener',
+                            self.native_main_hotkey.error,
+                        )
+                        self.native_main_hotkey = None
+                if not native_registered:
+                    hotkey_map[global_parsed] = on_global_activate
+                    logging.debug(f'Registered global hotkey: {global_parsed}')
             except Exception as e:
                 logging.error(f'Failed to parse global hotkey "{orig_shortcut}": {e}')
+
+            # --- Prompt Workbench hotkey ------------------------------------
+            prompt_shortcut = self.config.get('prompt_workbench', {}).get(
+                'shortcut', 'ctrl+shift+p'
+            )
+            try:
+                prompt_parsed = self._to_pynput_hotkey(prompt_shortcut)
+                pykeyboard.HotKey.parse(prompt_parsed)
+
+                def on_prompt_activate():
+                    if self.paused:
+                        return
+                    if not hotkey_modifiers_match_exactly(prompt_shortcut):
+                        logging.warning(
+                            'Ignored a Prompt hotkey activation with stale modifier state'
+                        )
+                        return
+                    def emit_after_release():
+                        if wait_for_hotkey_modifiers_release(prompt_shortcut):
+                            self.prompt_hotkey_triggered_signal.emit()
+                        else:
+                            logging.warning(
+                                'Ignored Prompt activation because modifiers stayed held'
+                            )
+
+                    threading.Thread(target=emit_after_release, daemon=True).start()
+
+                def on_native_prompt_activate():
+                    if self.paused:
+                        return
+                    if hotkey_has_extra_modifiers(prompt_shortcut):
+                        logging.warning(
+                            'Ignored native Prompt hotkey with extra modifier state'
+                        )
+                        return
+
+                    def emit_after_release():
+                        if wait_for_hotkey_modifiers_release(prompt_shortcut):
+                            self.prompt_hotkey_triggered_signal.emit()
+                        else:
+                            logging.warning(
+                                'Ignored Prompt activation because modifiers stayed held'
+                            )
+
+                    threading.Thread(target=emit_after_release, daemon=True).start()
+
+                native_prompt_registered = False
+                if (
+                    os.name == 'nt'
+                    and prompt_shortcut.strip().casefold() == 'ctrl+shift+p'
+                ):
+                    self.native_prompt_hotkey = WindowsCtrlSpaceHotkey(
+                        on_native_prompt_activate,
+                        modifiers=(
+                            WindowsCtrlSpaceHotkey.MOD_CONTROL
+                            | WindowsCtrlSpaceHotkey.MOD_SHIFT
+                            | WindowsCtrlSpaceHotkey.MOD_NOREPEAT
+                        ),
+                        virtual_key=ord('P'),
+                        hotkey_id=WindowsCtrlSpaceHotkey.HOTKEY_ID + 1,
+                        label='Ctrl+Shift+P',
+                    )
+                    native_prompt_registered = self.native_prompt_hotkey.start()
+                    if native_prompt_registered:
+                        logging.debug(
+                            'Registered native Ctrl+Shift+P for Prompt Workbench'
+                        )
+                    else:
+                        logging.warning(
+                            'Native Ctrl+Shift+P registration failed (%s); using compatibility listener',
+                            self.native_prompt_hotkey.error,
+                        )
+                        self.native_prompt_hotkey = None
+
+                if prompt_parsed in hotkey_map:
+                    logging.warning(
+                        'Prompt hotkey "%s" conflicts with the main shortcut; skipping',
+                        prompt_shortcut,
+                    )
+                elif not native_prompt_registered:
+                    hotkey_map[prompt_parsed] = on_prompt_activate
+                    logging.debug('Registered Prompt hotkey: %s', prompt_parsed)
+            except Exception as error:
+                logging.error(
+                    'Failed to parse Prompt hotkey "%s": %s',
+                    prompt_shortcut,
+                    error,
+                )
 
             # --- Per-button direct hotkeys ------------------------------------
             # Custom is excluded — it needs a typed instruction from the user,
@@ -561,12 +915,11 @@ class WritingToolApp(QtWidgets.QApplication):
                     )
                     logging.debug(f'Registered button hotkey: {parsed} -> {button_name}')
 
-            if not hotkey_map:
+            if hotkey_map:
+                self.hotkey_listener = pykeyboard.GlobalHotKeys(hotkey_map)
+                self.hotkey_listener.start()
+            elif self.native_main_hotkey is None:
                 logging.warning('No hotkeys to register')
-                return
-
-            self.hotkey_listener = pykeyboard.GlobalHotKeys(hotkey_map)
-            self.hotkey_listener.start()
         except Exception as e:
             logging.error(f'Failed to register hotkey listener: {e}')
 
@@ -583,7 +936,7 @@ class WritingToolApp(QtWidgets.QApplication):
         def callback():
             if self.paused:
                 return
-            if not hotkey_modifiers_are_physically_active(hotkey):
+            if not hotkey_modifiers_match_exactly(hotkey):
                 logging.warning(
                     'Ignored a preset hotkey activation with stale modifier state'
                 )
@@ -672,6 +1025,50 @@ class WritingToolApp(QtWidgets.QApplication):
         QtCore.QMetaObject.invokeMethod(self, "_show_popup", QtCore.Qt.ConnectionType.QueuedConnection)
 
     @Slot()
+    def on_prompt_hotkey_pressed(self):
+        """Open or focus the isolated Prompt Workbench."""
+
+        if self.check_prompt_trigger_spam():
+            logging.warning('Ignored rapid repeated Prompt hotkey activation')
+            return
+        window = self.prompt_workbench_window
+        if window is not None and not getattr(window, '_closed', False):
+            window.showNormal()
+            window.raise_()
+            window.activateWindow()
+            window.status_label.setText(
+                'Prompt 工作台已有会话；重复快捷键不会覆盖当前内容。'
+            )
+            return
+        QtCore.QMetaObject.invokeMethod(
+            self,
+            "_show_prompt_workbench",
+            QtCore.Qt.ConnectionType.QueuedConnection,
+        )
+
+    @Slot()
+    def _show_prompt_workbench(self):
+        holder = self._begin_prompt_selection_capture()
+        self.prompt_workbench_window = (
+            ui.PromptWorkbenchWindow.PromptWorkbenchWindow(self, holder)
+        )
+        self.prompt_workbench_window.show()
+        self.prompt_workbench_window.raise_()
+        self.prompt_workbench_window.activateWindow()
+
+    def _begin_prompt_selection_capture(self):
+        """Capture an optional selection without creating a writing request."""
+
+        holder = _SelectedTextHolder()
+        holder.source_window_handle = capture_foreground_window()
+        holder.ime_state = capture_ime_state(holder.source_window_handle)
+        if not self._fire_ctrl_c_and_capture_async(holder):
+            # Capture failure is a valid blank-workbench entry, not an error.
+            holder.ready.set()
+        self.prompt_capture_holder = holder
+        return holder
+
+    @Slot()
     def _show_popup(self):
         """
         Show the popup window the moment the hotkey fires, and capture the
@@ -737,6 +1134,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
         source_window_handle = capture_foreground_window()
         holder = _SelectedTextHolder()
+        holder.ime_state = capture_ime_state(source_window_handle)
         if not self._fire_ctrl_c_and_capture_async(holder):
             return None
 
@@ -970,10 +1368,23 @@ class WritingToolApp(QtWidgets.QApplication):
                 logging.debug('Getting response for window display')
             else:
                 logging.debug('Getting response for direct replacement')
+            def progress(characters, preview=""):
+                if open_in_window:
+                    self.generation_progress_signal.emit(
+                        {
+                            'request_id': request_id,
+                            'window': self.current_response_window,
+                            'characters': int(characters or 0),
+                            'preview': str(preview or ''),
+                        }
+                    )
+
             response = provider.get_response(
                 system_instruction,
                 prompt,
                 return_response=True,
+                request_options=self._writing_request_options(provider),
+                progress_callback=progress if open_in_window else None,
             )
             logging.debug(f'Got response of length: {len(response) if response else 0}')
             if response:
@@ -984,6 +1395,7 @@ class WritingToolApp(QtWidgets.QApplication):
                         'original': selected_text,
                         'result': response,
                         'source_window_handle': holder.source_window_handle,
+                        'ime_state': holder.ime_state,
                         'open_in_window': open_in_window,
                         'provider': provider.provider_name,
                         'model': str(
@@ -1046,6 +1458,21 @@ class WritingToolApp(QtWidgets.QApplication):
         self.pending_original = context.get('original', '')
         self.replace_text(result)
 
+    @Slot(object)
+    def _handle_generation_progress(self, context):
+        request_id = int(context.get('request_id', 0))
+        window = context.get('window')
+        if not self._request_guard.is_current(request_id):
+            return
+        if (
+            window is None
+            or getattr(window, '_closed', False)
+            or window is not self.current_response_window
+            or getattr(window, 'request_id', 0) != request_id
+        ):
+            return
+        window.set_stream_preview(context.get('preview', ''))
+
     @Slot(str, str)
     def show_message_box(self, title, message):
         """
@@ -1084,6 +1511,8 @@ class WritingToolApp(QtWidgets.QApplication):
             'original': original,
             'result': cleaned_text,
             'version': 1,
+            'source_window_handle': self.source_window_handle,
+            'ime_state': getattr(self.current_text_holder, 'ime_state', None),
         }
         if self.config.get('history_enabled', True):
             try:
@@ -1098,6 +1527,11 @@ class WritingToolApp(QtWidgets.QApplication):
             except Exception as error:
                 logging.error(f'Unable to save generated result to history: {error}')
 
+        # History entries intentionally persist text metadata only. Runtime
+        # window/IME handles are attached after persistence and never written.
+        entry['source_window_handle'] = self.source_window_handle
+        entry['ime_state'] = getattr(self.current_text_holder, 'ime_state', None)
+
         if self.config.get('safe_apply_enabled', True):
             if self.safe_apply_window is not None:
                 self.safe_apply_window.close()
@@ -1106,7 +1540,10 @@ class WritingToolApp(QtWidgets.QApplication):
             self.safe_apply_window.raise_()
             self.safe_apply_window.activateWindow()
         else:
-            self.apply_text_to_source(cleaned_text)
+            self.apply_text_to_source(
+                cleaned_text,
+                ime_state=getattr(self.current_text_holder, 'ime_state', None),
+            )
         self.output_queue = ""
 
     def _current_model_name(self):
@@ -1119,7 +1556,7 @@ class WritingToolApp(QtWidgets.QApplication):
             or ''
         ).strip()
 
-    def apply_text_to_source(self, text):
+    def apply_text_to_source(self, text, source_window_handle=None, ime_state=None):
         """Activate the captured source window and paste one complete version."""
         if not isinstance(text, str) or not text:
             return False
@@ -1132,18 +1569,20 @@ class WritingToolApp(QtWidgets.QApplication):
         except Exception as error:
             logging.error(f'Unable to place generated text on the clipboard: {error}')
             return False
-        if not self.source_window_handle:
+        target_window_handle = source_window_handle or self.source_window_handle
+        if not target_window_handle:
             logging.warning('No source window handle is available; left result on clipboard')
             return False
 
         try:
-            activated = activate_window(self.source_window_handle)
+            activated = activate_window(target_window_handle)
         except Exception as error:
             logging.error(f'Unable to reactivate the source window: {error}')
             activated = False
         if not activated:
             logging.warning('Unable to reactivate the source window; left result on clipboard')
             return False
+        restore_ime_state(ime_state, target_window_handle)
         try:
             kbrd = pykeyboard.Controller()
             paste_key = pykeyboard.KeyCode.from_vk(0x56) if os.name == 'nt' else 'v'
@@ -1154,6 +1593,7 @@ class WritingToolApp(QtWidgets.QApplication):
                 modifier_already_down=modifier_is_physically_down('ctrl'),
             )
             time.sleep(0.12)
+            restore_ime_state(ime_state, target_window_handle)
         except Exception as error:
             logging.error(f'Unable to apply text to source window: {error}')
             try:
@@ -1230,6 +1670,15 @@ class WritingToolApp(QtWidgets.QApplication):
         # Settings menu item
         settings_action = self.tray_menu.addAction(self._('Settings'))
         settings_action.triggered.connect(self.show_settings)
+
+        prompt_action = self.tray_menu.addAction('打开 Prompt 工作台')
+        prompt_action.triggered.connect(self.on_prompt_hotkey_pressed)
+
+        prompt_settings_action = self.tray_menu.addAction('Prompt 工作台设置')
+        prompt_settings_action.triggered.connect(self.show_prompt_settings)
+
+        prompt_library_action = self.tray_menu.addAction('Prompt 收藏库')
+        prompt_library_action.triggered.connect(self.show_prompt_library)
 
         history_action = self.tray_menu.addAction('历史与版本')
         history_action.triggered.connect(self.show_history)
@@ -1419,6 +1868,267 @@ class WritingToolApp(QtWidgets.QApplication):
         # Start the thread
         threading.Thread(target=process_thread, daemon=True).start()
 
+    @staticmethod
+    def _writing_request_options(provider):
+        """Fast defaults for ordinary rewrite operations."""
+
+        base = str(getattr(provider, 'api_base', '') or '').casefold()
+        model = str(getattr(provider, 'api_model', '') or '').casefold()
+        options = {'stream': True, 'timeout': 45.0}
+        if 'api.groq.com' in base:
+            options.update(
+                max_completion_tokens=1200,
+                reasoning_effort='low',
+                extra_body={'include_reasoning': False},
+            )
+        elif 'api.deepseek.com' in base or model.startswith('deepseek-'):
+            options.update(
+                max_tokens=1200,
+                extra_body={'thinking': {'type': 'disabled'}},
+            )
+        return options
+
+    @staticmethod
+    def _prompt_request_options(window, kind, provider):
+        """Map the visible generation strategy to provider-native controls."""
+
+        strategy = str(getattr(window, 'generation_strategy', 'balanced') or 'balanced')
+        base = str(getattr(provider, 'api_base', '') or '').casefold()
+        model = str(getattr(provider, 'api_model', '') or '').casefold()
+        limits = {'fast': 1800, 'balanced': 2600, 'deep': 4096}
+        options = {
+            'stream': True,
+            'max_tokens': limits.get(strategy, 2600),
+            'timeout': {'fast': 45.0, 'balanced': 75.0, 'deep': 150.0}.get(
+                strategy, 75.0
+            ),
+        }
+        if 'api.deepseek.com' in base or model.startswith('deepseek-'):
+            options['response_format'] = {'type': 'json_object'}
+            if strategy == 'deep':
+                options['reasoning_effort'] = 'low'
+                options['extra_body'] = {'thinking': {'type': 'enabled'}}
+            else:
+                options['extra_body'] = {'thinking': {'type': 'disabled'}}
+        elif 'api.groq.com' in base:
+            options['response_format'] = {'type': 'json_object'}
+            options.pop('max_tokens', None)
+            options['max_completion_tokens'] = limits.get(strategy, 2600)
+            options['reasoning_effort'] = 'medium' if strategy == 'deep' else 'low'
+            options['extra_body'] = {'include_reasoning': False}
+        return options
+
+    def dispatch_prompt_request(self, window, kind, messages, *, provider_override=None, using_fallback=False):
+        """Run one Prompt compiler or Judge request with independent routing."""
+
+        if window is None or getattr(window, '_closed', False):
+            return
+        provider = provider_override or self.current_prompt_provider
+        if provider is None or (provider_override is None and not self.prompt_provider_is_configured()):
+            window.show_error('Prompt AI 尚未完成独立配置')
+            return
+        request_id = self._prompt_request_guard.begin()
+        window.request_id = request_id
+        logging.debug(
+            'Prompt request started: id=%s kind=%s level=%s provider=%s',
+            request_id,
+            kind,
+            getattr(getattr(window, 'session', None), 'level', 'unknown'),
+            getattr(provider, 'provider_name', 'unknown'),
+        )
+        system_instruction = (
+            JUDGE_SYSTEM_INSTRUCTION if kind == 'judge' else COMPILER_SYSTEM_INSTRUCTION
+        )
+        safe_messages = [dict(message) for message in messages]
+        request_options = self._prompt_request_options(window, kind, provider)
+
+        def worker():
+            try:
+                def progress(characters, preview=""):
+                    self.prompt_progress_signal.emit(
+                        {
+                            'window': window,
+                            'request_id': request_id,
+                            'kind': kind,
+                            'characters': int(characters or 0),
+                            'preview': str(preview or '')[:200_000],
+                            'using_fallback': using_fallback,
+                        }
+                    )
+
+                response = provider.get_response(
+                    system_instruction,
+                    safe_messages,
+                    return_response=True,
+                    request_options=request_options,
+                    progress_callback=progress,
+                )
+                context = {
+                    'window': window,
+                    'request_id': request_id,
+                    'kind': kind,
+                    'response': response or '',
+                    'error': '',
+                    'messages': safe_messages,
+                    'using_fallback': using_fallback,
+                }
+            except Exception as error:
+                context = {
+                    'window': window,
+                    'request_id': request_id,
+                    'kind': kind,
+                    'response': '',
+                    'error': self._safe_error_text(error, provider=provider),
+                    'messages': safe_messages,
+                    'using_fallback': using_fallback,
+                }
+            self.prompt_response_signal.emit(context)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(object)
+    def _handle_prompt_progress(self, context):
+        request_id = int(context.get('request_id', 0))
+        window = context.get('window')
+        if not self._prompt_request_guard.is_current(request_id):
+            return
+        if window is None or getattr(window, '_closed', False) or window is not self.prompt_workbench_window:
+            return
+        phase = '备用模型生成中' if context.get('using_fallback') else '正在生成结构化结果'
+        window.note_generation_progress(context.get('preview', ''))
+        window.status_label.setText(f"{phase} · 已接收 {int(context.get('characters', 0)):,} 字符")
+
+    @Slot(object)
+    def _handle_prompt_response(self, context):
+        request_id = int(context.get('request_id', 0))
+        window = context.get('window')
+        if not self._prompt_request_guard.is_current(request_id):
+            logging.info('Discarded stale Prompt response: %s', request_id)
+            return
+        if (
+            window is None
+            or getattr(window, '_closed', False)
+            or getattr(window, 'request_id', 0) != request_id
+            or window is not self.prompt_workbench_window
+        ):
+            logging.info('Discarded Prompt response for an inactive window')
+            return
+        if context.get('error'):
+            if not context.get('using_fallback') and window.offer_fallback(
+                context.get('kind', 'compiler'),
+                context.get('messages') or [],
+                context['error'],
+            ):
+                return
+            window.show_error(context['error'])
+            return
+        session = getattr(window, 'session', None)
+        if session is None:
+            return
+        try:
+            if context.get('kind') == 'judge':
+                event = session.consume_judge_response(context.get('response', ''))
+            else:
+                event = session.consume_compiler_response(context.get('response', ''))
+        except Exception as error:
+            window.show_error(self._safe_error_text(error, provider=self.current_prompt_provider))
+            return
+
+        if event.kind == 'retry_compiler':
+            window.status_label.setText('正在修复并重新编译结构化结果…')
+            self.dispatch_prompt_request(window, 'compiler', session.compiler_messages())
+        elif event.kind == 'judge_required':
+            window.status_label.setText('正在执行 Level 3 质量复审…')
+            self.dispatch_prompt_request(window, 'judge', session.judge_messages())
+        elif event.kind == 'retry_judge':
+            window.status_label.setText('正在修复质量复审格式…')
+            self.dispatch_prompt_request(window, 'judge', session.judge_messages())
+        else:
+            window.handle_workflow_event(event)
+
+    def cancel_prompt_request(self, window=None):
+        """Invalidate a Prompt request without cancelling writing generations."""
+
+        provider = self.current_prompt_provider
+        if provider is not None:
+            try:
+                provider.cancel()
+            except Exception as error:
+                logging.error(
+                    'Unable to cancel Prompt provider: %s',
+                    self._safe_error_text(error, provider=provider),
+                )
+        self._prompt_request_guard.begin()
+        if window is not None:
+            window.request_id = 0
+
+    def preview_prompt_replacement(self, *, original, result, source_window_handle, ime_state=None):
+        """Route an explicit Prompt replacement through the safe diff preview."""
+
+        if not original or not result or not source_window_handle:
+            QtWidgets.QApplication.clipboard().setText(result or '')
+            self.show_message_signal.emit(
+                '无法安全替换', '原选区或源窗口已经失效，Prompt 已复制到剪贴板。'
+            )
+            return
+        if self.safe_apply_window is not None:
+            self.safe_apply_window.close()
+        entry = {
+            'id': '',
+            'option': 'Prompt 工作台',
+            'original': original,
+            'result': result,
+            'version': 1,
+            'source_window_handle': source_window_handle,
+            'ime_state': ime_state,
+        }
+        self.safe_apply_window = ui.SafeApplyWindow.SafeApplyWindow(self, entry)
+        self.safe_apply_window.show()
+        self.safe_apply_window.raise_()
+        self.safe_apply_window.activateWindow()
+
+    def show_prompt_settings(self):
+        if self.prompt_settings_window is None:
+            self.prompt_settings_window = (
+                ui.PromptSettingsWindow.PromptSettingsWindow(self)
+            )
+        self.prompt_settings_window.show()
+        self.prompt_settings_window.showNormal()
+        self.prompt_settings_window.raise_()
+        self.prompt_settings_window.activateWindow()
+
+    def show_prompt_library(self):
+        if self.prompt_library_window is None:
+            self.prompt_library_window = ui.PromptLibraryWindow.PromptLibraryWindow(self)
+        self.prompt_library_window.show()
+        self.prompt_library_window.showNormal()
+        self.prompt_library_window.raise_()
+        self.prompt_library_window.activateWindow()
+
+    def open_prompt_with_text(self, prompt):
+        """Open a blank Workbench and load a saved Prompt without clipboard capture."""
+
+        window = self.prompt_workbench_window
+        if window is None or getattr(window, '_closed', False):
+            window = ui.PromptWorkbenchWindow.PromptWorkbenchWindow(self, None)
+            self.prompt_workbench_window = window
+        window.load_library_prompt(prompt)
+        window.show()
+        window.showNormal()
+        window.raise_()
+        window.activateWindow()
+
+    def prompt_fallback_provider(self):
+        """Return the configured writing provider only when fallback is allowed."""
+
+        enabled = bool(self.config.get('prompt_workbench', {}).get('fallback_enabled', True))
+        provider = getattr(self, 'current_provider', None)
+        if not enabled or provider is None or provider is self.current_prompt_provider:
+            return None
+        if getattr(provider, 'client', None) is None:
+            return None
+        return provider
+
     def show_settings(self, providers_only=False):
 
         """
@@ -1444,6 +2154,8 @@ class WritingToolApp(QtWidgets.QApplication):
 
         if self.onboarding_window and self.onboarding_window.isVisible():
             window = self.onboarding_window
+        elif self.prompt_workbench_window and self.prompt_workbench_window.isVisible():
+            window = self.prompt_workbench_window
         elif self.popup_window and self.popup_window.isVisible():
             window = self.popup_window
         else:
@@ -1490,5 +2202,9 @@ class WritingToolApp(QtWidgets.QApplication):
         logging.debug('Stopping the listener')
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
+        if self.native_main_hotkey is not None:
+            self.native_main_hotkey.stop()
+        if self.native_prompt_hotkey is not None:
+            self.native_prompt_hotkey.stop()
         logging.debug('Exiting application')
         self.quit()

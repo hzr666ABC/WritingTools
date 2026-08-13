@@ -4,6 +4,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtCore, QtWidgets
+from PySide6.QtTest import QTest
 
 from ui.ResponseWindow import ResponseWindow
 
@@ -65,6 +66,22 @@ class ResponseWindowRoutingTests(unittest.TestCase):
         window.set_text("回答")
 
         self.assertAlmostEqual(window.current_text_display.zoom_factor, 1.35)
+        window.close()
+
+    def test_initial_response_stream_is_revealed_character_by_character(self):
+        app = FakeResponseApp()
+        window = ResponseWindow(app, "流式结果")
+
+        window.set_stream_preview("一个字一个字输出")
+        QTest.qWait(25)
+        partial = window._stream_preview_display.toPlainText()
+        self.assertGreaterEqual(len(partial), 1)
+        self.assertLess(len(partial), len("一个字一个字输出"))
+        QTest.qWait(220)
+        self.assertEqual(
+            window._stream_preview_display.toPlainText(),
+            "一个字一个字输出",
+        )
         window.close()
 
 

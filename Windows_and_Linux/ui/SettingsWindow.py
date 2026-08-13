@@ -8,11 +8,20 @@ from provider_studio import probe_provider, validate_base_url
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
-from settings_logic import find_hotkey_conflict, provider_index_by_name
+from settings_logic import (
+    find_named_hotkey_conflict,
+    provider_index_by_name,
+)
 
 from ui.AutostartManager import AutostartManager
 from ui.ShortcutRecorder import ShortcutRecorder
 from ui.UIUtils import UIUtils, colorMode
+from ui.VisualSystem import (
+    button_style,
+    card_style,
+    install_button_motion,
+    palette,
+)
 
 _ = lambda x: x
 
@@ -52,6 +61,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.provider_probe_button = None
         self.provider_probe_status = None
         self.provider_model_picker = None
+        self.save_button = None
         self.provider_probe_ready.connect(self._finish_provider_probe)
         self.init_ui()
         self.retranslate_ui()
@@ -84,7 +94,7 @@ class SettingsWindow(QtWidgets.QWidget):
             for description_line in provider.description.splitlines():
                 description_label = QtWidgets.QLabel(description_line.strip())
                 description_label.setStyleSheet(
-                    f"font-size: 12px; color: {'#b8bed4' if colorMode == 'dark' else '#6f7589'};"
+                    f"font-size:12px;color:{palette(colorMode)['text_soft']};"
                 )
                 description_label.setWordWrap(True)
                 self.current_provider_layout.addWidget(description_label)
@@ -165,6 +175,7 @@ class SettingsWindow(QtWidgets.QWidget):
 
         self.provider_detail_widget.updateGeometry()
         self.scroll_content.updateGeometry()
+        self.motion.reveal_widget(self.provider_detail_widget, duration=150)
 
     def _start_provider_probe(self):
         """Run provider discovery away from the UI thread."""
@@ -189,8 +200,9 @@ class SettingsWindow(QtWidgets.QWidget):
         if result.provider_name != self.app.providers[self.selected_provider_index].provider_name:
             return
 
-        color = "#43b581" if result.ok else "#e46f7b"
-        detail = f"{result.message} · {result.latency_ms} ms"
+        color = palette(colorMode)["success"] if result.ok else palette(colorMode)["danger"]
+        marker = "✓" if result.ok else "!"
+        detail = f"{marker}  {result.message} · {result.latency_ms} ms"
         self.provider_probe_status.setText(detail)
         self.provider_probe_status.setStyleSheet(f"font-size: 12px; color: {color};")
 
@@ -282,7 +294,7 @@ class SettingsWindow(QtWidgets.QWidget):
         title_row.addWidget(app_icon_label)
         title_label = QtWidgets.QLabel("设置")
         title_label.setStyleSheet(f"""
-            color: {'#f5f7ff' if colorMode == 'dark' else '#202638'};
+            color: {palette(colorMode)['text']};
             font-family: "Microsoft YaHei UI", "Segoe UI Variable";
             font-size: 26px;
             font-weight: 650;
@@ -293,7 +305,7 @@ class SettingsWindow(QtWidgets.QWidget):
 
         subtitle_label = QtWidgets.QLabel("保存后立即生效，无需重新启动。")
         subtitle_label.setStyleSheet(
-            f"color: {'#aeb5ce' if colorMode == 'dark' else '#747c91'}; font-size: 13px;"
+            f"color:{palette(colorMode)['text_soft']};font-size:13px;"
         )
         main_layout.addWidget(subtitle_label)
 
@@ -316,25 +328,20 @@ class SettingsWindow(QtWidgets.QWidget):
         content_layout.setContentsMargins(0, 4, 8, 6)
         content_layout.setSpacing(12)
 
-        section_style = f"""
-            QWidget#settingsSection {{
-                background: {'rgba(32,35,45,218)' if colorMode == 'dark' else 'rgba(255,255,255,228)'};
-                border: 1px solid {'rgba(255,255,255,24)' if colorMode == 'dark' else '#e5e7ef'};
-                border-radius: 13px;
-            }}
-            QLabel {{ color: {'#edf0ff' if colorMode == 'dark' else '#293043'}; }}
+        section_style = card_style(colorMode, "settingsSection") + f"""
+            QLabel {{ color: {palette(colorMode)['text']}; }}
             QLineEdit, QComboBox {{
                 min-height: 38px;
                 padding: 4px 11px;
-                border: 1px solid {'#51586d' if colorMode == 'dark' else '#d9dce6'};
+                border: 1px solid {palette(colorMode)['border_strong']};
                 border-radius: 10px;
-                background: {'#292d38' if colorMode == 'dark' else '#fdfdff'};
-                color: {'#f7f8ff' if colorMode == 'dark' else '#202638'};
+                background: {palette(colorMode)['surface']};
+                color: {palette(colorMode)['text']};
                 font-size: 14px;
             }}
-            QLineEdit:focus, QComboBox:focus {{ border: 1px solid #6e7cf0; }}
+            QLineEdit:focus, QComboBox:focus {{ border: 1px solid {palette(colorMode)['accent']}; }}
             QCheckBox, QRadioButton {{
-                color: {'#e6e8f5' if colorMode == 'dark' else '#45495a'};
+                color: {palette(colorMode)['text_soft']};
                 font-size: 14px;
                 spacing: 8px;
             }}
@@ -353,7 +360,7 @@ class SettingsWindow(QtWidgets.QWidget):
             helper = QtWidgets.QLabel(description)
             helper.setWordWrap(True)
             helper.setStyleSheet(
-                f"color: {'#aeb4ca' if colorMode == 'dark' else '#778096'}; font-size: 13px;"
+                f"color:{palette(colorMode)['text_soft']};font-size:13px;"
             )
             layout.addWidget(helper)
             return section, layout
@@ -529,26 +536,16 @@ class SettingsWindow(QtWidgets.QWidget):
         save_button = QtWidgets.QPushButton(
             "完成 AI 设置" if self.providers_only else "保存设置"
         )
+        self.save_button = save_button
         save_button.setFixedSize(148, 44)
-        save_button.setStyleSheet("""
-            QPushButton {
-                background: #5b69e9;
-                color: white;
-                padding: 10px 18px;
-                font-size: 14px;
-                font-weight: 650;
-                border: none;
-                border-radius: 10px;
-            }
-            QPushButton:hover { background: #4f5edc; }
-            QPushButton:pressed { background: #4452c7; }
-        """)
+        save_button.setStyleSheet(button_style(colorMode, primary=True))
+        install_button_motion(save_button, colorMode, strong=True)
         save_button.clicked.connect(self.save_settings)
         action_row = QtWidgets.QHBoxLayout()
         action_row.setContentsMargins(2, 0, 0, 0)
         save_note = QtWidgets.QLabel("更改仅保存在本机 · 无需重新启动")
         save_note.setStyleSheet(
-            f"color: {'#969db5' if colorMode == 'dark' else '#858ca0'}; font-size: 12px;"
+            f"color:{palette(colorMode)['muted']};font-size:12px;"
         )
         action_row.addWidget(save_note)
         action_row.addStretch()
@@ -557,43 +554,30 @@ class SettingsWindow(QtWidgets.QWidget):
 
     @staticmethod
     def _secondary_button_style():
-        return f"""
-            QPushButton {{
-                min-height: 34px;
-                padding: 4px 12px;
-                border: 1px solid {'#555c72' if colorMode == 'dark' else '#d7dae6'};
-                border-radius: 9px;
-                background: {'#303541' if colorMode == 'dark' else '#f8f9fc'};
-                color: {'#edf0ff' if colorMode == 'dark' else '#45495a'};
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                border: 1px solid #7f8cff;
-                background: {'#3d4251' if colorMode == 'dark' else '#eef1ff'};
-            }}
-        """
+        return button_style(colorMode)
 
     @staticmethod
     def _provider_card_style():
+        p = palette(colorMode)
         return f"""
             QPushButton {{
                 padding: 7px 12px;
-                border: 1px solid {'#50576a' if colorMode == 'dark' else '#dfe2ea'};
-                border-radius: 10px;
-                background: {'#292e39' if colorMode == 'dark' else '#fcfcfe'};
-                color: {'#e8ebf8' if colorMode == 'dark' else '#4e5364'};
+                border: 1px solid {p['border']};
+                border-radius: 12px;
+                background: {p['surface_alt']};
+                color: {p['text_soft']};
                 font-size: 13px;
                 font-weight: 550;
                 text-align: left;
             }}
             QPushButton:hover {{
-                border-color: #aab3f8;
-                background: {'#343a48' if colorMode == 'dark' else '#f3f5ff'};
+                border-color: {p['accent']};
+                background: {p['surface_soft']};
             }}
             QPushButton:checked {{
-                border: 1px solid #6f7df0;
-                background: {'#3d466c' if colorMode == 'dark' else '#edf0ff'};
-                color: {'#ffffff' if colorMode == 'dark' else '#3947b7'};
+                border: 1px solid {p['accent']};
+                background: {p['accent_soft']};
+                color: {p['accent_text']};
                 font-weight: 650;
             }}
             QPushButton:focus {{ border: 2px solid #7f8cff; }}
@@ -601,22 +585,7 @@ class SettingsWindow(QtWidgets.QWidget):
 
     @staticmethod
     def _provider_action_button_style():
-        return f"""
-            QPushButton {{
-                min-height: 32px;
-                padding: 3px 12px;
-                border: 1px solid {'#6571cf' if colorMode == 'dark' else '#aeb7f4'};
-                border-radius: 9px;
-                background: {'#353a4a' if colorMode == 'dark' else '#f4f6ff'};
-                color: {'#e9ecff' if colorMode == 'dark' else '#4654c6'};
-                font-size: 12px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                background: {'#41485b' if colorMode == 'dark' else '#e9edff'};
-                border-color: #7f8cff;
-            }}
-        """
+        return button_style(colorMode, compact=True)
 
     def update_background_preview(self, path):
         """Show a cropped preview only when a valid custom image exists."""
@@ -689,8 +658,24 @@ class SettingsWindow(QtWidgets.QWidget):
                 self.shortcut_input.setFocus()
                 return
             options = getattr(self.app, 'options', {})
-            conflict_key = find_hotkey_conflict(options, shortcut)
-            if conflict_key:
+            conflict_owner = find_named_hotkey_conflict(
+                shortcut,
+                prompt_shortcut=(
+                    self.app.config.get("prompt_workbench", {}).get("shortcut", "")
+                ),
+                options=options,
+                ignore="main",
+            )
+            if conflict_owner == "prompt":
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "快捷键冲突",
+                    "该组合已经分配给“Prompt 工作台”，请换一个快捷键。",
+                )
+                self.shortcut_input.setFocus()
+                return
+            if conflict_owner and conflict_owner.startswith("option:"):
+                conflict_key = conflict_owner.split(":", 1)[1]
                 display_name = option_display_name(
                     conflict_key, options.get(conflict_key, {})
                 )
@@ -738,6 +723,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.app.config['is_config_file_updated_for_v8'] = True
 
         selected_provider.save_config()
+        self.app._ensure_custom_defaults()
 
         provider_name = self.app.config.get('provider', 'Gemini')
         self.app.current_provider = next(

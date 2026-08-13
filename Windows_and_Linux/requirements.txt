@@ -1,4 +1,4 @@
-cryptography==49.0.0
+cryptography==50.0.0
 darkdetect==0.8.0
 google-genai==2.12.1
 markdown2==2.5.5
