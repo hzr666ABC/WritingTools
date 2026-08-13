@@ -51,6 +51,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.plain_radio = None
         self.provider_container = None
         self.autostart_checkbox = None
+        self.autostart_status = None
         self.shortcut_input = None
         self.remember_checkbox = None
         self.custom_radio = None
@@ -418,10 +419,16 @@ class SettingsWindow(QtWidgets.QWidget):
             general_layout.addLayout(tool_row)
 
             if AutostartManager.get_startup_path():
-                self.autostart_checkbox = QtWidgets.QCheckBox("开机启动")
+                self.autostart_checkbox = QtWidgets.QCheckBox(
+                    "登录 Windows 后自动启动"
+                )
                 self.autostart_checkbox.setChecked(AutostartManager.check_autostart())
                 self.autostart_checkbox.stateChanged.connect(self.toggle_autostart)
                 general_layout.addWidget(self.autostart_checkbox)
+                self.autostart_status = QtWidgets.QLabel()
+                self.autostart_status.setWordWrap(True)
+                general_layout.addWidget(self.autostart_status)
+                self._refresh_autostart_status()
 
             content_layout.addWidget(general_section)
 
@@ -630,10 +637,41 @@ class SettingsWindow(QtWidgets.QWidget):
         if self.custom_radio.isChecked():
             self.plain_radio.setChecked(True)
 
-    @staticmethod
-    def toggle_autostart(state):
-        """Toggle the autostart setting."""
-        AutostartManager.set_autostart(state == 2)
+    def _refresh_autostart_status(self):
+        if self.autostart_status is None:
+            return
+        if AutostartManager.check_autostart():
+            self.autostart_status.setText(
+                "✓ 已加入当前用户启动项；登录后将在后台运行，无需管理员权限。"
+            )
+            self.autostart_status.setStyleSheet(
+                f"color: {palette()['success']}; font-size: 12px;"
+            )
+        else:
+            self.autostart_status.setText(
+                "关闭时不会随 Windows 登录启动，仍可通过桌面快捷方式打开。"
+            )
+            self.autostart_status.setStyleSheet(
+                f"color: {palette()['text_soft']}; font-size: 12px;"
+            )
+
+    def toggle_autostart(self, state):
+        """Apply the requested startup state and roll back the UI on error."""
+
+        requested = state == QtCore.Qt.CheckState.Checked.value
+        if AutostartManager.set_autostart(requested):
+            self._refresh_autostart_status()
+            return
+
+        self.autostart_checkbox.blockSignals(True)
+        self.autostart_checkbox.setChecked(not requested)
+        self.autostart_checkbox.blockSignals(False)
+        QtWidgets.QMessageBox.warning(
+            self,
+            "无法更新开机启动",
+            AutostartManager.last_error or "请确认当前程序位于可访问的固定目录。",
+        )
+        self._refresh_autostart_status()
 
     def save_settings(self):
         """Save the current settings."""
